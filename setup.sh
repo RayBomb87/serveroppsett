@@ -228,6 +228,10 @@ step_identity() {
   ok "Identitet lagret i $CONF: $SERVERNAVN"
 }
 
+get_lan_ip() {
+  ip -4 route get 1.1.1.1 2>/dev/null | grep -oP 'src \K[0-9.]+' || hostname -I | awk '{print $1}'
+}
+
 APP_KATALOG="arcane"
 
 step_apps() {
@@ -255,17 +259,20 @@ step_apps() {
   done
 }
 
+app_port_arcane() { printf '3552'; }
+
 install_arcane() {
   local dir=$APPS_DIR/arcane
   if [ -f "$dir/compose.yml" ]; then skip "arcane er alt satt opp i $dir"; return; fi
   ensure_docker
-  local uid gid app_url ip
+  local uid gid app_url ip port
   uid=$(id -u "$ADMIN_USER"); gid=$(id -g "$ADMIN_USER")
-  ip=$(ip -4 route get 1.1.1.1 2>/dev/null | grep -oP 'src \K[0-9.]+' || hostname -I | awk '{print $1}')
+  ip=$(get_lan_ip)
+  port=$(app_port_arcane)
   if ask_yesno "Bruke DNS-navn ($SERVERNAVN) i APP_URL? (n = bruk IP)"; then
-    app_url="http://arcane.$SERVERNAVN:3552"
+    app_url="http://arcane.$SERVERNAVN:$port"
   else
-    app_url="http://$ip:3552"
+    app_url="http://$ip:$port"
   fi
   install -d -o "$ADMIN_USER" -g "$ADMIN_USER" "$dir"
   printf 'ENCRYPTION_KEY=%s\nJWT_SECRET=%s\n' "$(openssl rand -hex 32)" "$(openssl rand -hex 32)" > "$dir/.env"
@@ -276,7 +283,7 @@ services:
     image: ghcr.io/getarcaneapp/manager:latest
     container_name: arcane
     ports:
-      - 3552:3552
+      - $port:$port
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - arcane-data:/app/data
@@ -294,10 +301,24 @@ volumes:
 EOF
   chown -R "$ADMIN_USER:$ADMIN_USER" "$dir"
   (cd "$dir" && docker compose up -d)
-  ok "arcane kjører — åpne $app_url"
-  if [ "$app_url" != "http://$ip:3552" ]; then
-    ok "(eller via IP hvis DNS ikke er satt opp ennå: http://$ip:3552)"
-  fi
+  ok "arcane installert og kjører"
+}
+
+print_app_logins() {
+  local app funnet=0
+  for app in $APP_KATALOG; do
+    [ -f "$APPS_DIR/$app/compose.yml" ] && { funnet=1; break; }
+  done
+  [ "$funnet" -eq 1 ] || return 0
+  local ip port
+  ip=$(get_lan_ip)
+  msg "Innloggingslenker for installerte apper:"
+  for app in $APP_KATALOG; do
+    if [ -f "$APPS_DIR/$app/compose.yml" ]; then
+      port=$("app_port_$app")
+      ok "$app: http://$ip:$port  (IP)  |  http://$app.$SERVERNAVN:$port  (DNS, krever oppsatt navn)"
+    fi
+  done
 }
 
 main() {
@@ -310,6 +331,7 @@ main() {
   step_ssh_hardening
   step_identity
   step_apps
+  print_app_logins
   ok "Ferdig! Logg inn som $ADMIN_USER med SSH-nøkkel."
 }
 main "$@"
