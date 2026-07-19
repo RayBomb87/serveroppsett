@@ -75,6 +75,7 @@ step_docker() {
     systemctl enable --now docker >/dev/null 2>&1 || true
   fi
   docker compose version >/dev/null 2>&1 || die "docker compose-plugin mangler etter installasjon."
+  docker info >/dev/null 2>&1 || die "Docker-daemonen svarer ikke (docker info feilet)."
   ok "Compose: $(docker compose version --short)"
 }
 
