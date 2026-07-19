@@ -3,6 +3,7 @@
 set -euo pipefail
 
 CONF=/etc/serveroppsett.conf
+ADMIN_CONF=/etc/serveroppsett-admin.conf
 TTY=/dev/tty
 
 msg()  { printf '\033[1;34m==>\033[0m %s\n' "$*" >&2; }
@@ -28,10 +29,10 @@ ask_yesno() { # ask_yesno "Spørsmål" -> exit 0=ja 1=nei
   case "$svar" in [jJyY]*) return 0 ;; *) return 1 ;; esac
 }
 
-ask_valid() { # ask_valid "Spørsmål" "regex" "feilhint" -> svar (spør på nytt til gyldig)
-  local q=$1 re=$2 hint=$3 svar
+ask_valid() { # ask_valid "Spørsmål" "regex" "feilhint" [default] -> svar (spør på nytt til gyldig)
+  local q=$1 re=$2 hint=$3 def=${4:-} svar
   while true; do
-    svar=$(ask "$q")
+    svar=$(ask "$q" "$def")
     [[ "$svar" =~ $re ]] && { printf '%s' "$svar"; return; }
     msg "Ugyldig verdi ($hint): «$svar» — prøv igjen."
   done
@@ -109,8 +110,14 @@ ensure_docker() { # kalles av apper som krever docker, uansett tidligere svar
 
 step_admin_user() {
   msg "Admin-bruker"
+  local forrige=""
+  if [ -f "$ADMIN_CONF" ]; then
+    . "$ADMIN_CONF"
+    forrige=${ADMIN_USER:-}
+    [ -n "$forrige" ] && msg "Fant tidligere admin-bruker: $forrige (trykk Enter for å gjenbruke)"
+  fi
   while true; do
-    ADMIN_USER=$(ask_valid "Brukernavn for admin-brukeren" '^[a-z_][a-z0-9_-]*$' "små bokstaver/tall/_/-")
+    ADMIN_USER=$(ask_valid "Brukernavn for admin-brukeren" '^[a-z_][a-z0-9_-]*$' "små bokstaver/tall/_/-" "$forrige")
     [ "$ADMIN_USER" != root ] && break
     msg "Admin-brukeren kan ikke være root — herding stenger root-SSH. Velg et annet navn."
   done
@@ -131,6 +138,7 @@ step_admin_user() {
     grupper="$sudogrp, docker"
   fi
   ADMIN_HOME=$(getent passwd "$ADMIN_USER" | cut -d: -f6)
+  printf 'ADMIN_USER=%s\n' "$ADMIN_USER" > "$ADMIN_CONF"
   ok "$ADMIN_USER er i gruppene: $grupper"
 }
 
