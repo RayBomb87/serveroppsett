@@ -4,6 +4,7 @@ set -euo pipefail
 
 CONF=/etc/serveroppsett.conf
 ADMIN_CONF=/etc/serveroppsett-admin.conf
+APPS_CONF=/etc/serveroppsett-apps.conf
 TTY=/dev/tty
 
 msg()  { printf '\033[1;34m==>\033[0m %s\n' "$*" >&2; }
@@ -227,8 +228,19 @@ APP_KATALOG="arcane"
 
 step_apps() {
   msg "App-installasjon"
-  APPS_DIR=$ADMIN_HOME/apps/dockerapps
-  install -d -o "$ADMIN_USER" -g "$ADMIN_USER" "$ADMIN_HOME/apps" "$APPS_DIR"
+  local owner=$ADMIN_USER
+  if [ -f "$APPS_CONF" ]; then
+    . "$APPS_CONF"
+    [ -n "${APPS_DIR:-}" ] || die "Korrupt $APPS_CONF (mangler APPS_DIR) — slett fila og kjør på nytt."
+    owner=${APPS_OWNER:-$ADMIN_USER}
+    if [ "$owner" != "$ADMIN_USER" ]; then
+      msg "Apper ble opprinnelig satt opp for brukeren $owner — bruker fortsatt $APPS_DIR for å unngå duplikatinstallasjon."
+    fi
+  else
+    APPS_DIR=$ADMIN_HOME/apps/dockerapps
+    printf 'APPS_DIR=%s\nAPPS_OWNER=%s\n' "$APPS_DIR" "$ADMIN_USER" > "$APPS_CONF"
+  fi
+  install -d -o "$owner" -g "$owner" "$(dirname "$APPS_DIR")" "$APPS_DIR"
   local app
   for app in $APP_KATALOG; do
     if ask_yesno "Installere $app?"; then "install_$app"; fi
