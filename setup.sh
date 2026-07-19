@@ -353,9 +353,16 @@ create_ct() {
   local raw_url=https://raw.githubusercontent.com/RayBomb87/serveroppsett/main/setup.sh
   pct exec "$CT_VMID" -- bash -c "
     set -euo pipefail
+    if ! command -v curl >/dev/null && ! command -v wget >/dev/null; then
+      if command -v apt-get >/dev/null; then
+        apt-get update -q && DEBIAN_FRONTEND=noninteractive apt-get install -y -q curl
+      elif command -v dnf >/dev/null; then
+        dnf install -y -q curl
+      fi
+    fi
     if command -v curl >/dev/null; then curl -fsSL '$raw_url' | bash
     elif command -v wget >/dev/null; then wget -qO- '$raw_url' | bash
-    else echo 'Verken curl eller wget finnes i denne malen — kan ikke bootstrappe automatisk.' >&2; exit 1
+    else echo 'Fant verken curl eller wget, og kunne ikke installere curl automatisk (ukjent pakkehåndterer i denne malen).' >&2; exit 1
     fi" \
     || die "Bootstrapping av CT $CT_VMID feilet — sjekk pct exec-loggen over."
   ok "CT $CT_VMID ($CT_HOSTNAME) er satt opp."
