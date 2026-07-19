@@ -177,6 +177,59 @@ step_identity() {
   ok "Identitet lagret i $CONF: $SERVERNAVN"
 }
 
+APP_KATALOG="arcane"
+
+step_apps() {
+  msg "App-installasjon"
+  APPS_DIR=$ADMIN_HOME/apps/dockerapps
+  install -d -o "$ADMIN_USER" -g "$ADMIN_USER" "$ADMIN_HOME/apps" "$APPS_DIR"
+  local app
+  for app in $APP_KATALOG; do
+    if ask_yesno "Installere $app?"; then "install_$app"; fi
+  done
+}
+
+install_arcane() {
+  local dir=$APPS_DIR/arcane
+  if [ -f "$dir/compose.yml" ]; then skip "arcane er alt satt opp i $dir"; return; fi
+  local uid gid app_url
+  uid=$(id -u "$ADMIN_USER"); gid=$(id -g "$ADMIN_USER")
+  if ask_yesno "Bruke DNS-navn ($SERVERNAVN) i APP_URL? (n = bruk IP)"; then
+    app_url="http://arcane.$SERVERNAVN:3552"
+  else
+    local ip; ip=$(hostname -I | awk '{print $1}')
+    app_url="http://$ip:3552"
+  fi
+  install -d -o "$ADMIN_USER" -g "$ADMIN_USER" "$dir"
+  printf 'ENCRYPTION_KEY=%s\nJWT_SECRET=%s\n' "$(openssl rand -hex 32)" "$(openssl rand -hex 32)" > "$dir/.env"
+  chmod 600 "$dir/.env"
+  cat > "$dir/compose.yml" <<EOF
+services:
+  arcane:
+    image: ghcr.io/getarcaneapp/manager:latest
+    container_name: arcane
+    ports:
+      - 3552:3552
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - arcane-data:/app/data
+      - $APPS_DIR:/app/data/projects
+    environment:
+      - APP_URL=$app_url
+      - PUID=$uid
+      - PGID=$gid
+      - ENCRYPTION_KEY=\${ENCRYPTION_KEY}
+      - JWT_SECRET=\${JWT_SECRET}
+    restart: unless-stopped
+
+volumes:
+  arcane-data:
+EOF
+  chown -R "$ADMIN_USER:$ADMIN_USER" "$dir"
+  (cd "$dir" && docker compose up -d)
+  ok "arcane kjører — åpne $app_url"
+}
+
 main() {
   require_root
   detect_os
@@ -186,5 +239,7 @@ main() {
   step_ssh_key
   step_ssh_hardening
   step_identity
+  step_apps
+  ok "Ferdig! Logg inn som $ADMIN_USER med SSH-nøkkel."
 }
 main "$@"
