@@ -122,6 +122,23 @@ step_ssh_key() {
   chmod 600 "$keyfile" || die "chmod av authorized_keys feilet."
 }
 
+step_ssh_hardening() {
+  msg "SSH-herding"
+  [ -s "$ADMIN_HOME/.ssh/authorized_keys" ] || die "Ingen nøkkel i authorized_keys — nekter å stenge passordinnlogging."
+  local f=/etc/ssh/sshd_config.d/90-serveroppsett.conf
+  if [ -f "$f" ]; then
+    skip "Herding er alt konfigurert ($f)"
+  else
+    install -d -m 755 /etc/ssh/sshd_config.d
+    grep -q 'sshd_config.d' /etc/ssh/sshd_config || printf 'Include /etc/ssh/sshd_config.d/*.conf\n' | cat - /etc/ssh/sshd_config > /tmp/sc && mv /tmp/sc /etc/ssh/sshd_config
+    printf 'PermitRootLogin no\nPasswordAuthentication no\n' > "$f"
+    sshd -t || { rm -f "$f"; die "sshd-konfig feilet validering — endringen er rullet tilbake."; }
+    systemctl reload ssh 2>/dev/null || systemctl reload sshd 2>/dev/null || true
+    ok "Root-SSH og passordinnlogging er stengt (kun nøkkel nå)"
+  fi
+  msg "VIKTIG: test i et NYTT vindu at 'ssh $ADMIN_USER@<ip>' virker før du logger ut!"
+}
+
 main() {
   require_root
   detect_os
@@ -129,5 +146,6 @@ main() {
   step_docker
   step_admin_user
   step_ssh_key
+  step_ssh_hardening
 }
 main "$@"
