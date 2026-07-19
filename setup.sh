@@ -247,7 +247,11 @@ step_apps() {
   install -d -o "$owner" -g "$owner" "$(dirname "$APPS_DIR")" "$APPS_DIR"
   local app
   for app in $APP_KATALOG; do
-    if ask_yesno "Installere $app?"; then "install_$app"; fi
+    if [ -f "$APPS_DIR/$app/compose.yml" ]; then
+      skip "$app er alt satt opp i $APPS_DIR/$app — spør ikke på nytt"
+    elif ask_yesno "Installere $app?"; then
+      "install_$app"
+    fi
   done
 }
 
