@@ -138,7 +138,8 @@ step_ssh_key() {
   msg "SSH-nøkkel for $ADMIN_USER"
   local keyfile=$ADMIN_HOME/.ssh/authorized_keys nokler
   if [ -s "$keyfile" ]; then
-    skip "authorized_keys finnes alt for $ADMIN_USER ($keyfile)"
+    local antall; antall=$(grep -c . "$keyfile")
+    skip "Fant $antall SSH-nøkkel(er) i $keyfile fra før — spør ikke om flere"
     return
   fi
   if ask_yesno "Hente offentlige nøkler fra en GitHub-konto?"; then
