@@ -25,21 +25,19 @@ link() { # link "URL" -> klikkbar lenke på stdout (viser rå URL i terminaler u
 
 ask() { # ask "Spørsmål" [default] -> svar på stdout
   local q=$1 def=${2:-} svar
-  sep
   if [ -n "$def" ]; then
     read -rp "$q [$def]: " svar < "$TTY"; printf '%s' "${svar:-$def}"
   else
     while true; do
       read -rp "$q: " svar < "$TTY"
       [ -n "$svar" ] && { printf '%s' "$svar"; return; }
-      sep
+      printf '\n' >&2
     done
   fi
 }
 
 ask_yesno() { # ask_yesno "Spørsmål" -> exit 0=ja 1=nei
   local svar
-  sep
   read -rp "$1 [j/n]: " svar < "$TTY"
   case "$svar" in [jJyY]*) return 0 ;; *) return 1 ;; esac
 }
@@ -70,7 +68,6 @@ show_app_info() { # show_app_info <app> -> henter og viser fersk repo-info fra G
 ask_install_choice() { # ask_install_choice <app> -> exit 0=ja 1=nei (viser info og spør på nytt ved 'i')
   local app=$1 svar
   while true; do
-    sep
     read -rp "Installere $app? [j/n/i=info]: " svar < "$TTY"
     case "$svar" in
       [jJyY]*) return 0 ;;
@@ -85,11 +82,11 @@ require_root() { [ "$(id -u)" -eq 0 ] || die "Kjør som root (eller med sudo).";
 is_pve_host() { command -v pveversion >/dev/null; }
 
 pve_menu() {
+  sep
   msg "Proxmox-vert oppdaget"
   msg "Denne serveren er selve Proxmox-hosten, ikke en gjest."
   local valg
   while true; do
-    sep
     printf '  1) Systemendringer på hosten (VE-oppgradering, GPU-drivere, m.m.)\n' >&2
     printf '  2) Opprette og sette opp en ny CT\n' >&2
     printf '  3) Avbryt\n' >&2
@@ -124,8 +121,10 @@ pick_from_list() { # pick_from_list "Spørsmål" item1 item2 ... -> valgt item p
   [ "${#valg[@]}" -gt 0 ] || return 1
   if [ "${#valg[@]}" -eq 1 ]; then printf '%s' "${valg[0]}"; return 0; fi
   local i svar
+  local forste_gang=1
   while true; do
-    sep
+    [ "$forste_gang" -eq 1 ] || printf '\n' >&2
+    forste_gang=0
     printf '%s\n' "$sporsmal" >&2
     for i in "${!valg[@]}"; do printf '  %d) %s\n' "$((i+1))" "${valg[$i]}" >&2; done
     printf '  t) tilbake\n' >&2
@@ -146,7 +145,6 @@ ask_yesno_back() { # ask_yesno_back "Spørsmål" j|n -> 0=ja 1=nei 2=tilbake
   local sporsmal=$1 std=$2 svar hint
   hint=$( [ "$std" = j ] && printf 'J/n' || printf 'j/N' )
   while true; do
-    sep
     read -rp "$sporsmal [$hint/t=tilbake]: " svar < "$TTY"
     svar=${svar:-$std}
     case "$svar" in
@@ -167,12 +165,14 @@ pick_storage() { # pick_storage <innholdstype> <spørsmål> -> lagrings-ID på s
 }
 
 step_ct_template() {
+  sep
   msg "CT-mal"
   while true; do
     local lager
     lager=$(pick_storage vztmpl "Hvilken lagringsplass skal sjekkes for CT-maler?")
     [ $? -eq 2 ] && return 2
     CT_TEMPLATE_STORAGE=$lager
+    printf '\n' >&2
     while true; do
       local -a maler
       mapfile -t maler < <(pvesm list "$CT_TEMPLATE_STORAGE" --content vztmpl | awk 'NR>1{print $1}')
@@ -197,6 +197,7 @@ step_ct_template() {
         local -a tilgjengelig
         mapfile -t tilgjengelig < <(pveam available --section system | awk '{print $2}')
         local nedlasting
+        printf '\n' >&2
         nedlasting=$(pick_from_list "Velg mal å laste ned:" "${tilgjengelig[@]}")
         if [ $? -eq 2 ]; then continue; fi
         msg "Laster ned $nedlasting ..."
@@ -210,6 +211,7 @@ step_ct_template() {
 }
 
 step_ct_vmid() {
+  sep
   msg "VMID"
   local forslag; forslag=$(pvesh get /cluster/nextid)
   while true; do
@@ -222,6 +224,7 @@ step_ct_vmid() {
 }
 
 step_ct_hostname() {
+  sep
   msg "Hostname"
   while true; do
     CT_HOSTNAME=$(ask "Hostname for CT-en (t=tilbake)")
@@ -232,6 +235,7 @@ step_ct_hostname() {
 }
 
 step_ct_storage() {
+  sep
   msg "Lagring for CT-en"
   local svar; svar=$(pick_storage rootdir "Hvilken lagringsplass skal CT-en ligge på?")
   [ $? -eq 2 ] && return 2
@@ -240,12 +244,14 @@ step_ct_storage() {
 }
 
 step_ct_resources() {
+  sep
   msg "Ressurser (Enter = standardverdi i klammer)"
   local -a felt=(CT_CORES CT_MEMORY CT_SWAP CT_DISK)
   local -a etikett=("Antall CPU-kjerner" "RAM i MB" "Swap i MB" "Disk i GB")
   local -a std=(1 512 512 8)
   local i=0 svar
   while [ "$i" -ge 0 ] && [ "$i" -lt 4 ]; do
+    [ "$i" -eq 0 ] || printf '\n' >&2
     svar=$(ask "${etikett[$i]} (t=tilbake)" "${std[$i]}")
     if [ "$svar" = t ]; then
       i=$((i-1))
@@ -259,6 +265,7 @@ step_ct_resources() {
 }
 
 step_ct_sikkerhet() {
+  sep
   msg "Sikkerhet"
   while true; do
     ask_yesno_back "Opprette som unprivileged container? (anbefalt)" j
@@ -267,6 +274,7 @@ step_ct_sikkerhet() {
       0) CT_UNPRIVILEGED=1 ;;
       1) CT_UNPRIVILEGED=0 ;;
     esac
+    printf '\n' >&2
     ask_yesno_back "Sette root-passord på CT-en?" n
     case $? in
       2) continue ;;
@@ -277,6 +285,7 @@ step_ct_sikkerhet() {
 }
 
 step_ct_network() {
+  sep
   msg "Nettverk"
   local -a broer
   mapfile -t broer < <(ip -o link show type bridge | awk -F': ' '{print $2}')
@@ -284,12 +293,15 @@ step_ct_network() {
   while true; do
     CT_BRIDGE=$(pick_from_list "Velg nettverksbro:" "${broer[@]}")
     [ $? -eq 2 ] && return 2
+    printf '\n' >&2
     ask_yesno_back "Bruke DHCP?" j
     case $? in
       2) continue ;;
       0) CT_NET_MODE=dhcp; CT_STATIC_IP=""; CT_GATEWAY=""; return 0 ;;
       1)
+        printf '\n' >&2
         CT_STATIC_IP=$(ask_valid "IP-adresse i CIDR-form (f.eks. 10.10.1.99/24)" '^[0-9]{1,3}(\.[0-9]{1,3}){3}/[0-9]{1,2}$' "må være IP/prefiks")
+        printf '\n' >&2
         CT_GATEWAY=$(ask_valid "Gateway" '^[0-9]{1,3}(\.[0-9]{1,3}){3}$' "må være en IPv4-adresse")
         CT_NET_MODE=static
         return 0
@@ -299,6 +311,7 @@ step_ct_network() {
 }
 
 step_ct_bekreft() {
+  sep
   msg "Oppsummering:"
   printf '  VMID:         %s\n' "$CT_VMID" >&2
   printf '  Hostname:     %s\n' "$CT_HOSTNAME" >&2
@@ -314,7 +327,7 @@ step_ct_bekreft() {
   printf '  Root-passord: %s\n' "$([ "$CT_SET_ROOTPW" -eq 1 ] && echo "settes etter opprettelse" || echo "settes ikke")" >&2
   local svar
   while true; do
-    sep
+    printf '\n' >&2
     read -rp "Opprette CT-en med disse innstillingene? [j/t=tilbake/n=avbryt]: " svar < "$TTY"
     case "$svar" in
       [jJ]*) return 0 ;;
@@ -428,6 +441,7 @@ pkg_install() {
 }
 
 step_system() {
+  sep
   msg "Oppdaterer systemet"
   pkg_update
   ok "System oppdatert"
@@ -452,6 +466,7 @@ install_docker_engine() {
 }
 
 step_docker() {
+  sep
   msg "Docker"
   if command -v docker >/dev/null; then
     install_docker_engine
@@ -476,6 +491,7 @@ ensure_docker() { # kalles av apper som krever docker, uansett tidligere svar
 }
 
 step_admin_user() {
+  sep
   msg "Admin-bruker"
   local forrige=""
   if [ -f "$ADMIN_CONF" ]; then
@@ -510,6 +526,7 @@ step_admin_user() {
 }
 
 step_ssh_key() {
+  sep
   msg "SSH-nøkkel for $ADMIN_USER"
   local keyfile=$ADMIN_HOME/.ssh/authorized_keys nokler
   if [ -s "$keyfile" ]; then
@@ -518,6 +535,7 @@ step_ssh_key() {
     return
   fi
   if ask_yesno "Hente offentlige nøkler fra en GitHub-konto?"; then
+    printf '\n' >&2
     local ghuser; ghuser=$(ask "GitHub-brukernavn")
     nokler=$(curl -fsSL "https://github.com/$ghuser.keys") || die "Klarte ikke hente nøkler for $ghuser."
     [ -n "$nokler" ] || die "GitHub-kontoen $ghuser har ingen offentlige nøkler."
@@ -539,6 +557,7 @@ step_ssh_key() {
 }
 
 step_ssh_hardening() {
+  sep
   msg "SSH-herding"
   [ -s "$ADMIN_HOME/.ssh/authorized_keys" ] || die "Ingen nøkkel i authorized_keys — nekter å stenge passordinnlogging."
   [ -f /etc/ssh/sshd_config ] || die "Fant ikke /etc/ssh/sshd_config — er openssh-server installert?"
@@ -576,6 +595,7 @@ step_ssh_hardening() {
 }
 
 step_identity() {
+  sep
   msg "Server-identitet"
   if [ -f "$CONF" ]; then
     . "$CONF"
@@ -585,8 +605,11 @@ step_identity() {
   fi
   local lok node vmid dom
   lok=$(ask_valid "Lokasjon (kort, f.eks. sted1)" '^[A-Za-z0-9-]+$' "kun bokstaver/tall/bindestrek")
+  printf '\n' >&2
   node=$(ask_valid "Proxmox-node (f.eks. prox1)" '^[A-Za-z0-9-]+$' "kun bokstaver/tall/bindestrek" "${SERVEROPPSETT_NODE_HINT:-}")
+  printf '\n' >&2
   vmid=$(ask_valid "VM/CT-id (f.eks. 101)" '^[0-9]+$' "kun tall" "${SERVEROPPSETT_VMID_HINT:-}")
+  printf '\n' >&2
   dom=$(ask_valid "Domene (f.eks. eksempel.no)" '^[A-Za-z0-9.-]+$' "kun bokstaver/tall/punktum/bindestrek")
   SERVERNAVN="$lok-$node-$vmid.$dom"
   printf 'LOKASJON=%s\nNODE=%s\nVMID=%s\nDOMENE=%s\nSERVERNAVN=%s\n' \
@@ -601,6 +624,7 @@ get_lan_ip() {
 APP_KATALOG="arcane dozzle"
 
 step_apps() {
+  sep
   msg "App-installasjon"
   local owner=$ADMIN_USER
   if [ -f "$APPS_CONF" ]; then
@@ -615,12 +639,16 @@ step_apps() {
     printf 'APPS_DIR=%s\nAPPS_OWNER=%s\n' "$APPS_DIR" "$ADMIN_USER" > "$APPS_CONF"
   fi
   install -d -o "$owner" -g "$owner" "$(dirname "$APPS_DIR")" "$APPS_DIR"
-  local app
+  local app forste=1
   for app in $APP_KATALOG; do
     if [ -f "$APPS_DIR/$app/compose.yml" ]; then
       skip "$app er alt satt opp i $APPS_DIR/$app — spør ikke på nytt"
-    elif ask_install_choice "$app"; then
-      "install_$app"
+    else
+      [ "$forste" -eq 1 ] || printf '\n' >&2
+      forste=0
+      if ask_install_choice "$app"; then
+        "install_$app"
+      fi
     fi
   done
 }
@@ -636,6 +664,7 @@ install_arcane() {
   uid=$(id -u "$ADMIN_USER"); gid=$(id -g "$ADMIN_USER")
   ip=$(get_lan_ip)
   port=$(app_port_arcane)
+  printf '\n' >&2
   if ask_yesno "Bruke DNS-navn ($LOKASJON-$NODE-$VMID-arcane.$DOMENE) i APP_URL? (n = bruk IP)"; then
     app_url="http://$LOKASJON-$NODE-$VMID-arcane.$DOMENE:$port"
   else
