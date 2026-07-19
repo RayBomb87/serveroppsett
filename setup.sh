@@ -72,8 +72,7 @@ step_system() {
   ok "sudo, curl, ca-certificates, openssl, openssh-server på plass"
 }
 
-step_docker() {
-  msg "Docker"
+install_docker_engine() {
   if command -v docker >/dev/null; then
     skip "Docker er installert ($(docker --version))"
   else
@@ -86,6 +85,26 @@ step_docker() {
   docker compose version >/dev/null 2>&1 || die "docker compose-plugin mangler etter installasjon."
   docker info >/dev/null 2>&1 || die "Docker-daemonen svarer ikke (docker info feilet)."
   ok "Compose: $(docker compose version --short)"
+}
+
+step_docker() {
+  msg "Docker"
+  if ask_yesno "Installere Docker og Docker Compose?"; then
+    install_docker_engine
+  else
+    skip "Docker (valgt bort — installeres automatisk senere hvis en app krever det)"
+  fi
+}
+
+ensure_docker() { # kalles av apper som krever docker, uansett tidligere svar
+  if ! command -v docker >/dev/null; then
+    msg "Denne appen krever Docker — installerer det nå"
+    install_docker_engine
+  fi
+  if [ -n "${ADMIN_USER:-}" ] && getent group docker >/dev/null && ! id -nG "$ADMIN_USER" | grep -qw docker; then
+    usermod -aG docker "$ADMIN_USER"
+    ok "$ADMIN_USER lagt til docker-gruppen"
+  fi
 }
 
 step_admin_user() {
@@ -206,6 +225,7 @@ step_apps() {
 install_arcane() {
   local dir=$APPS_DIR/arcane
   if [ -f "$dir/compose.yml" ]; then skip "arcane er alt satt opp i $dir"; return; fi
+  ensure_docker
   local uid gid app_url
   uid=$(id -u "$ADMIN_USER"); gid=$(id -g "$ADMIN_USER")
   if ask_yesno "Bruke DNS-navn ($SERVERNAVN) i APP_URL? (n = bruk IP)"; then
