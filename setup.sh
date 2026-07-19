@@ -255,12 +255,12 @@ install_arcane() {
   local dir=$APPS_DIR/arcane
   if [ -f "$dir/compose.yml" ]; then skip "arcane er alt satt opp i $dir"; return; fi
   ensure_docker
-  local uid gid app_url
+  local uid gid app_url ip
   uid=$(id -u "$ADMIN_USER"); gid=$(id -g "$ADMIN_USER")
+  ip=$(ip -4 route get 1.1.1.1 2>/dev/null | grep -oP 'src \K[0-9.]+' || hostname -I | awk '{print $1}')
   if ask_yesno "Bruke DNS-navn ($SERVERNAVN) i APP_URL? (n = bruk IP)"; then
     app_url="http://arcane.$SERVERNAVN:3552"
   else
-    local ip; ip=$(ip -4 route get 1.1.1.1 2>/dev/null | grep -oP 'src \K[0-9.]+' || hostname -I | awk '{print $1}')
     app_url="http://$ip:3552"
   fi
   install -d -o "$ADMIN_USER" -g "$ADMIN_USER" "$dir"
@@ -291,6 +291,9 @@ EOF
   chown -R "$ADMIN_USER:$ADMIN_USER" "$dir"
   (cd "$dir" && docker compose up -d)
   ok "arcane kjører — åpne $app_url"
+  if [ "$app_url" != "http://$ip:3552" ]; then
+    ok "(eller via IP hvis DNS ikke er satt opp ennå: http://$ip:3552)"
+  fi
 }
 
 main() {
