@@ -7,6 +7,12 @@ ADMIN_CONF=/etc/serveroppsett-admin.conf
 APPS_CONF=/etc/serveroppsett-apps.conf
 TTY=/dev/tty
 
+# Unngå apt-listchanges/perl sine harmløse "Cannot set locale"-varsler på
+# ferske maler uten genererte locales (kun C er alltid tilgjengelig).
+export LC_ALL=C
+export LANGUAGE=C
+export APT_LISTCHANGES_FRONTEND=none
+
 msg()  { printf '\033[1;34m==>\033[0m %s\n' "$*" >&2; }
 ok()   { printf '\033[1;32m ✔\033[0m %s\n' "$*" >&2; }
 skip() { printf '\033[1;33m ↷\033[0m %s (hopper over)\n' "$*" >&2; }
@@ -548,10 +554,10 @@ step_ssh_hardening() {
     fi
     [ -n "$backup" ] && rm -f "$backup"
     if systemctl enable --now ssh 2>/dev/null || systemctl enable --now sshd 2>/dev/null; then
-      if systemctl reload ssh 2>/dev/null || systemctl reload sshd 2>/dev/null; then
+      if systemctl restart ssh 2>/dev/null || systemctl restart sshd 2>/dev/null; then
         ok "Root-SSH og passordinnlogging er stengt (kun nøkkel nå)"
       else
-        msg "ADVARSEL: fikk ikke lastet sshd på nytt automatisk — kjør 'systemctl reload sshd' manuelt; herdingen gjelder først etter reload."
+        msg "ADVARSEL: fikk ikke startet sshd på nytt automatisk — kjør 'systemctl restart sshd' manuelt; herdingen gjelder først etter restart."
       fi
     else
       msg "ADVARSEL: fikk ikke aktivert/startet SSH-tjenesten automatisk — kjør 'systemctl enable --now sshd' manuelt; herdingen gjelder først da."
@@ -621,8 +627,8 @@ install_arcane() {
   uid=$(id -u "$ADMIN_USER"); gid=$(id -g "$ADMIN_USER")
   ip=$(get_lan_ip)
   port=$(app_port_arcane)
-  if ask_yesno "Bruke DNS-navn ($SERVERNAVN) i APP_URL? (n = bruk IP)"; then
-    app_url="http://arcane.$SERVERNAVN:$port"
+  if ask_yesno "Bruke DNS-navn ($LOKASJON-$NODE-$VMID-arcane.$DOMENE) i APP_URL? (n = bruk IP)"; then
+    app_url="http://$LOKASJON-$NODE-$VMID-arcane.$DOMENE:$port"
   else
     app_url="http://$ip:$port"
   fi
@@ -687,6 +693,7 @@ print_app_logins() {
     [ -f "$APPS_DIR/$app/compose.yml" ] && { funnet=1; break; }
   done
   [ "$funnet" -eq 1 ] || return 0
+  [ -f "$CONF" ] && . "$CONF"
   local ip port ip_url dns_url forste=1
   ip=$(get_lan_ip)
   msg "Innloggingslenker for installerte apper:"
@@ -697,7 +704,7 @@ print_app_logins() {
       forste=0
       port=$("app_port_$app")
       ip_url="http://$ip:$port"
-      dns_url="http://$app.$SERVERNAVN:$port"
+      dns_url="http://$LOKASJON-$NODE-$VMID-$app.$DOMENE:$port"
       printf '\033[1m%s\033[0m\n' "$app" >&2
       printf '  IP:  %s\n' "$(link "$ip_url")" >&2
       printf '  DNS: %s  (krever oppsatt navn)\n' "$(link "$dns_url")" >&2
@@ -719,6 +726,7 @@ main() {
   step_ssh_key
   step_ssh_hardening
   step_identity
+  . "$CONF"
   step_apps
   print_app_logins
   ok "Ferdig! Logg inn som $ADMIN_USER med SSH-nøkkel."
