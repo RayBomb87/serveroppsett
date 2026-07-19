@@ -304,6 +304,7 @@ step_ct_bekreft() {
 }
 
 create_ct() {
+  msg "CT-oppsett: trykk Enter for å bruke standardverdien i klammer [ ], eller skriv «t» for å gå tilbake ett steg."
   # run_wizard MÅ kalles i en betingelse (if/&&/||) — stegene bruker
   # return 1/2 som normal navigasjon, og det krever at set -e er
   # slått av for hele kalltreet her.
@@ -349,7 +350,13 @@ create_ct() {
   fi
 
   msg "Bootstrapper CT $CT_VMID (kjører setup.sh inni containeren) ..."
-  pct exec "$CT_VMID" -- bash -c "curl -fsSL https://raw.githubusercontent.com/RayBomb87/serveroppsett/main/setup.sh | bash" \
+  local raw_url=https://raw.githubusercontent.com/RayBomb87/serveroppsett/main/setup.sh
+  pct exec "$CT_VMID" -- bash -c "
+    set -euo pipefail
+    if command -v curl >/dev/null; then curl -fsSL '$raw_url' | bash
+    elif command -v wget >/dev/null; then wget -qO- '$raw_url' | bash
+    else echo 'Verken curl eller wget finnes i denne malen — kan ikke bootstrappe automatisk.' >&2; exit 1
+    fi" \
     || die "Bootstrapping av CT $CT_VMID feilet — sjekk pct exec-loggen over."
   ok "CT $CT_VMID ($CT_HOSTNAME) er satt opp."
 }
