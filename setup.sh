@@ -153,6 +153,7 @@ pick_storage() { # pick_storage <innholdstype> <spørsmål> -> lagrings-ID på s
 }
 
 step_ct_template() {
+  msg "CT-mal"
   while true; do
     local lager
     lager=$(pick_storage vztmpl "Hvilken lagringsplass skal sjekkes for CT-maler?")
@@ -195,9 +196,10 @@ step_ct_template() {
 }
 
 step_ct_vmid() {
+  msg "VMID"
   local forslag; forslag=$(pvesh get /cluster/nextid)
   while true; do
-    CT_VMID=$(ask "VMID for den nye CT-en [t=tilbake]" "$forslag")
+    CT_VMID=$(ask "VMID for den nye CT-en" "$forslag")
     [ "$CT_VMID" = t ] && return 2
     [[ "$CT_VMID" =~ ^[0-9]+$ ]] || { msg "Må være tall."; continue; }
     pct status "$CT_VMID" >/dev/null 2>&1 && { msg "VMID $CT_VMID er alt i bruk — velg et annet."; continue; }
@@ -206,8 +208,9 @@ step_ct_vmid() {
 }
 
 step_ct_hostname() {
+  msg "Hostname"
   while true; do
-    CT_HOSTNAME=$(ask "Hostname for CT-en [t=tilbake]")
+    CT_HOSTNAME=$(ask "Hostname for CT-en (t=tilbake)")
     [ "$CT_HOSTNAME" = t ] && return 2
     [[ "$CT_HOSTNAME" =~ ^[A-Za-z0-9-]+$ ]] && return 0
     msg "Ugyldig hostname (kun bokstaver/tall/bindestrek): «$CT_HOSTNAME»"
@@ -215,6 +218,7 @@ step_ct_hostname() {
 }
 
 step_ct_storage() {
+  msg "Lagring for CT-en"
   local svar; svar=$(pick_storage rootdir "Hvilken lagringsplass skal CT-en ligge på?")
   [ $? -eq 2 ] && return 2
   CT_STORAGE=$svar
@@ -222,12 +226,13 @@ step_ct_storage() {
 }
 
 step_ct_resources() {
+  msg "Ressurser (Enter = standardverdi i klammer)"
   local -a felt=(CT_CORES CT_MEMORY CT_SWAP CT_DISK)
   local -a etikett=("Antall CPU-kjerner" "RAM i MB" "Swap i MB" "Disk i GB")
   local -a std=(1 512 512 8)
   local i=0 svar
   while [ "$i" -ge 0 ] && [ "$i" -lt 4 ]; do
-    svar=$(ask "${etikett[$i]} [t=tilbake]" "${std[$i]}")
+    svar=$(ask "${etikett[$i]} (t=tilbake)" "${std[$i]}")
     if [ "$svar" = t ]; then
       i=$((i-1))
       continue
@@ -240,6 +245,7 @@ step_ct_resources() {
 }
 
 step_ct_sikkerhet() {
+  msg "Sikkerhet"
   while true; do
     ask_yesno_back "Opprette som unprivileged container? (anbefalt)" j
     case $? in
@@ -257,6 +263,7 @@ step_ct_sikkerhet() {
 }
 
 step_ct_network() {
+  msg "Nettverk"
   local -a broer
   mapfile -t broer < <(ip -o link show type bridge | awk -F': ' '{print $2}')
   [ "${#broer[@]}" -gt 0 ] || die "Fant ingen nettverksbro på denne Proxmox-hosten."
@@ -304,7 +311,7 @@ step_ct_bekreft() {
 }
 
 create_ct() {
-  msg "CT-oppsett: trykk Enter for å bruke standardverdien i klammer [ ], eller skriv «t» for å gå tilbake ett steg."
+  msg "CT-oppsett: trykk kun Enter for å godta standardverdien vist i klammer, f.eks. [512] — skriv «t» for å gå tilbake ett steg når som helst."
   # run_wizard MÅ kalles i en betingelse (if/&&/||) — stegene bruker
   # return 1/2 som normal navigasjon, og det krever at set -e er
   # slått av for hele kalltreet her.
@@ -344,6 +351,15 @@ create_ct() {
   done
   ok "CT $CT_VMID er klar"
 
+  msg "Venter på nettverk/DNS i CT $CT_VMID ..."
+  forsok=0
+  until pct exec "$CT_VMID" -- getent hosts raw.githubusercontent.com >/dev/null 2>&1; do
+    forsok=$((forsok+1))
+    [ "$forsok" -ge 30 ] && die "CT $CT_VMID fikk ikke nettverk/DNS etter 30 sekunder — sjekk nettverksoppsettet manuelt (f.eks. «pct exec $CT_VMID -- ip a»)."
+    sleep 1
+  done
+  ok "Nettverk er oppe i CT $CT_VMID"
+
   if [ "$CT_SET_ROOTPW" -eq 1 ]; then
     msg "Sett root-passord for CT $CT_VMID:"
     until pct exec "$CT_VMID" -- passwd < "$TTY"; do msg "Passord ikke satt — prøv igjen:"; done
@@ -355,9 +371,10 @@ create_ct() {
     set -euo pipefail
     if ! command -v curl >/dev/null && ! command -v wget >/dev/null; then
       if command -v apt-get >/dev/null; then
-        apt-get update -q && DEBIAN_FRONTEND=noninteractive apt-get install -y -q curl
+        apt-get update -q || true
+        DEBIAN_FRONTEND=noninteractive apt-get install -y -q curl || true
       elif command -v dnf >/dev/null; then
-        dnf install -y -q curl
+        dnf install -y -q curl || true
       fi
     fi
     if command -v curl >/dev/null; then curl -fsSL '$raw_url' | bash
