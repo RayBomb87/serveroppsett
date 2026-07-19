@@ -12,6 +12,10 @@ ok()   { printf '\033[1;32m ✔\033[0m %s\n' "$*" >&2; }
 skip() { printf '\033[1;33m ↷\033[0m %s (hopper over)\n' "$*" >&2; }
 die()  { printf '\033[1;31mFEIL:\033[0m %s\n' "$*" >&2; exit 1; }
 
+link() { # link "URL" -> klikkbar lenke på stdout (viser rå URL i terminaler uten støtte)
+  printf '\033]8;;%s\033\\%s\033]8;;\033\\' "$1" "$1"
+}
+
 ask() { # ask "Spørsmål" [default] -> svar på stdout
   local q=$1 def=${2:-} svar
   if [ -n "$def" ]; then
@@ -310,15 +314,23 @@ print_app_logins() {
     [ -f "$APPS_DIR/$app/compose.yml" ] && { funnet=1; break; }
   done
   [ "$funnet" -eq 1 ] || return 0
-  local ip port
+  local ip port ip_url dns_url forste=1
   ip=$(get_lan_ip)
   msg "Innloggingslenker for installerte apper:"
+  printf '\n' >&2
   for app in $APP_KATALOG; do
     if [ -f "$APPS_DIR/$app/compose.yml" ]; then
+      [ "$forste" -eq 1 ] || printf -- '----------------------------------------\n' >&2
+      forste=0
       port=$("app_port_$app")
-      ok "$app: http://$ip:$port  (IP)  |  http://$app.$SERVERNAVN:$port  (DNS, krever oppsatt navn)"
+      ip_url="http://$ip:$port"
+      dns_url="http://$app.$SERVERNAVN:$port"
+      printf '\033[1m%s\033[0m\n' "$app" >&2
+      printf '  IP:  %s\n' "$(link "$ip_url")" >&2
+      printf '  DNS: %s  (krever oppsatt navn)\n' "$(link "$dns_url")" >&2
     fi
   done
+  printf '\n' >&2
 }
 
 main() {
