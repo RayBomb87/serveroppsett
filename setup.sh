@@ -137,6 +137,10 @@ step_admin_user() {
 step_ssh_key() {
   msg "SSH-nøkkel for $ADMIN_USER"
   local keyfile=$ADMIN_HOME/.ssh/authorized_keys nokler
+  if [ -s "$keyfile" ]; then
+    skip "authorized_keys finnes alt for $ADMIN_USER ($keyfile)"
+    return
+  fi
   if ask_yesno "Hente offentlige nøkler fra en GitHub-konto?"; then
     local ghuser; ghuser=$(ask "GitHub-brukernavn")
     nokler=$(curl -fsSL "https://github.com/$ghuser.keys") || die "Klarte ikke hente nøkler for $ghuser."
