@@ -43,6 +43,32 @@ ask_valid() { # ask_valid "Spørsmål" "regex" "feilhint" [default] -> svar (sp�
   done
 }
 
+show_app_info() { # show_app_info <app> -> henter og viser fersk repo-info fra GitHub
+  local app=$1 repo json desc stars
+  repo=$("app_repo_$app" 2>/dev/null) || { msg "Ingen info-kilde registrert for $app."; return; }
+  msg "Henter fersk info om $app fra GitHub ..."
+  json=$(curl -fsSL "https://api.github.com/repos/$repo" 2>/dev/null) || { msg "Klarte ikke hente info (nettverk eller GitHub utilgjengelig)."; return; }
+  desc=$(printf '%s' "$json" | grep -oP '"description":\s*"\K[^"]*' | head -1)
+  stars=$(printf '%s' "$json" | grep -oP '"stargazers_count":\s*\K[0-9]+' | head -1)
+  printf '\n' >&2
+  printf '  %s\n' "${desc:-(ingen beskrivelse funnet)}" >&2
+  [ -n "$stars" ] && printf '  \xE2\xAD\x90 %s stjerner på GitHub\n' "$stars" >&2
+  printf '  %s\n' "$(link "https://github.com/$repo")" >&2
+  printf '\n' >&2
+}
+
+ask_install_choice() { # ask_install_choice <app> -> exit 0=ja 1=nei (viser info og spør på nytt ved 'i')
+  local app=$1 svar
+  while true; do
+    read -rp "Installere $app? [j/n/i=info]: " svar < "$TTY"
+    case "$svar" in
+      [jJyY]*) return 0 ;;
+      [iI]*) show_app_info "$app" ;;
+      *) return 1 ;;
+    esac
+  done
+}
+
 require_root() { [ "$(id -u)" -eq 0 ] || die "Kjør som root (eller med sudo)."; }
 
 detect_os() {
@@ -257,13 +283,14 @@ step_apps() {
   for app in $APP_KATALOG; do
     if [ -f "$APPS_DIR/$app/compose.yml" ]; then
       skip "$app er alt satt opp i $APPS_DIR/$app — spør ikke på nytt"
-    elif ask_yesno "Installere $app?"; then
+    elif ask_install_choice "$app"; then
       "install_$app"
     fi
   done
 }
 
 app_port_arcane() { printf '3552'; }
+app_repo_arcane() { printf 'getarcaneapp/arcane'; }
 
 install_arcane() {
   local dir=$APPS_DIR/arcane
@@ -309,6 +336,7 @@ EOF
 }
 
 app_port_dozzle() { printf '8080'; }
+app_repo_dozzle() { printf 'amir20/dozzle'; }
 
 install_dozzle() {
   local dir=$APPS_DIR/dozzle
