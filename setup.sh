@@ -76,7 +76,7 @@ step_system() {
 
 install_docker_engine() {
   if command -v docker >/dev/null; then
-    skip "Docker er installert ($(docker --version))"
+    skip "Docker er installert ($(docker --version)) — holdes oppdatert automatisk via systemoppdateringen"
   else
     curl -fsSL https://get.docker.com | sh
     ok "Docker installert: $(docker --version)"
@@ -91,6 +91,10 @@ install_docker_engine() {
 
 step_docker() {
   msg "Docker"
+  if command -v docker >/dev/null; then
+    install_docker_engine
+    return
+  fi
   if ask_yesno "Installere Docker og Docker Compose?"; then
     install_docker_engine
   else
