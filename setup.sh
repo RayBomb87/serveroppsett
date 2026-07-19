@@ -130,11 +130,26 @@ step_ssh_hardening() {
     skip "Herding er alt konfigurert ($f)"
   else
     install -d -m 755 /etc/ssh/sshd_config.d
-    grep -q 'sshd_config.d' /etc/ssh/sshd_config || printf 'Include /etc/ssh/sshd_config.d/*.conf\n' | cat - /etc/ssh/sshd_config > /tmp/sc && mv /tmp/sc /etc/ssh/sshd_config
+    local backup=""
+    if ! grep -Eq '^[[:space:]]*Include[[:space:]]+/etc/ssh/sshd_config\.d' /etc/ssh/sshd_config; then
+      backup=$(mktemp)
+      cp /etc/ssh/sshd_config "$backup"
+      local tmp; tmp=$(mktemp)
+      printf 'Include /etc/ssh/sshd_config.d/*.conf\n' | cat - /etc/ssh/sshd_config > "$tmp"
+      mv "$tmp" /etc/ssh/sshd_config
+    fi
     printf 'PermitRootLogin no\nPasswordAuthentication no\n' > "$f"
-    sshd -t || { rm -f "$f"; die "sshd-konfig feilet validering — endringen er rullet tilbake."; }
-    systemctl reload ssh 2>/dev/null || systemctl reload sshd 2>/dev/null || true
-    ok "Root-SSH og passordinnlogging er stengt (kun nøkkel nå)"
+    if ! sshd -t; then
+      rm -f "$f"
+      [ -n "$backup" ] && mv "$backup" /etc/ssh/sshd_config
+      die "sshd-konfig feilet validering — endringen er rullet tilbake."
+    fi
+    [ -n "$backup" ] && rm -f "$backup"
+    if systemctl reload ssh 2>/dev/null || systemctl reload sshd 2>/dev/null; then
+      ok "Root-SSH og passordinnlogging er stengt (kun nøkkel nå)"
+    else
+      msg "ADVARSEL: fikk ikke lastet sshd på nytt automatisk — kjør 'systemctl reload sshd' manuelt; herdingen gjelder først etter reload."
+    fi
   fi
   msg "VIKTIG: test i et NYTT vindu at 'ssh $ADMIN_USER@<ip>' virker før du logger ut!"
 }
