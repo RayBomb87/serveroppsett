@@ -621,6 +621,28 @@ get_lan_ip() {
   ip -4 route get 1.1.1.1 2>/dev/null | grep -oP 'src \K[0-9.]+' || hostname -I | awk '{print $1}'
 }
 
+pick_app_url() { # pick_app_url <app> -> hostname (uten protokoll/port) på stdout; lagrer egendefinert valg for gjenbruk i innloggingsoversikten
+  local app=$1 dns_navn="$LOKASJON-$NODE-$VMID-$app.$DOMENE" ip valg
+  ip=$(get_lan_ip)
+  printf '\n' >&2
+  printf 'Hvilken adresse skal %s bruke?\n' "$app" >&2
+  printf '  1) DNS-navn (%s)\n' "$dns_navn" >&2
+  printf '  2) IP (%s)\n' "$ip" >&2
+  printf '  3) Egendefinert\n' >&2
+  read -rp "Valg [1]: " valg < "$TTY"
+  case "${valg:-1}" in
+    2) printf '%s' "$ip" ;;
+    3)
+      printf '\n' >&2
+      local egendef; egendef=$(ask_valid "Egendefinert adresse (uten http:// og port)" '^[A-Za-z0-9.-]+$' "kun bokstaver/tall/punktum/bindestrek")
+      mkdir -p "$APPS_DIR/$app"
+      printf '%s' "$egendef" > "$APPS_DIR/$app/.dns_navn"
+      printf '%s' "$egendef"
+      ;;
+    *) printf '%s' "$dns_navn" ;;
+  esac
+}
+
 APP_KATALOG="arcane dozzle"
 
 step_apps() {
@@ -660,26 +682,11 @@ install_arcane() {
   local dir=$APPS_DIR/arcane
   if [ -f "$dir/compose.yml" ]; then skip "arcane er alt satt opp i $dir"; return; fi
   ensure_docker
-  local uid gid app_url ip port
+  local uid gid app_url port hostname
   uid=$(id -u "$ADMIN_USER"); gid=$(id -g "$ADMIN_USER")
-  ip=$(get_lan_ip)
   port=$(app_port_arcane)
-  local dns_navn="$LOKASJON-$NODE-$VMID-arcane.$DOMENE" valg
-  printf '\n' >&2
-  printf 'Hvilken adresse skal Arcane bruke i APP_URL?\n' >&2
-  printf '  1) DNS-navn (%s)\n' "$dns_navn" >&2
-  printf '  2) IP (%s)\n' "$ip" >&2
-  printf '  3) Egendefinert\n' >&2
-  read -rp "Valg [1]: " valg < "$TTY"
-  case "${valg:-1}" in
-    2) app_url="http://$ip:$port" ;;
-    3)
-      printf '\n' >&2
-      local egendef; egendef=$(ask_valid "Egendefinert adresse (uten http:// og port)" '^[A-Za-z0-9.-]+$' "kun bokstaver/tall/punktum/bindestrek")
-      app_url="http://$egendef:$port"
-      ;;
-    *) app_url="http://$dns_navn:$port" ;;
-  esac
+  hostname=$(pick_app_url arcane)
+  app_url="http://$hostname:$port"
   install -d -o "$ADMIN_USER" -g "$ADMIN_USER" "$dir"
   printf 'ENCRYPTION_KEY=%s\nJWT_SECRET=%s\n' "$(openssl rand -hex 32)" "$(openssl rand -hex 32)" > "$dir/.env"
   chmod 600 "$dir/.env"
@@ -718,6 +725,7 @@ install_dozzle() {
   if [ -f "$dir/compose.yml" ]; then skip "dozzle er alt satt opp i $dir"; return; fi
   ensure_docker
   local port; port=$(app_port_dozzle)
+  pick_app_url dozzle >/dev/null
   install -d -o "$ADMIN_USER" -g "$ADMIN_USER" "$dir"
   cat > "$dir/compose.yml" <<EOF
 services:
@@ -742,7 +750,7 @@ print_app_logins() {
   done
   [ "$funnet" -eq 1 ] || return 0
   [ -f "$CONF" ] && . "$CONF"
-  local ip port ip_url dns_url forste=1
+  local ip port ip_url dns_url dns_navn forste=1
   ip=$(get_lan_ip)
   msg "Innloggingslenker for installerte apper:"
   printf '\n' >&2
@@ -752,7 +760,9 @@ print_app_logins() {
       forste=0
       port=$("app_port_$app")
       ip_url="http://$ip:$port"
-      dns_url="http://$LOKASJON-$NODE-$VMID-$app.$DOMENE:$port"
+      dns_navn="$LOKASJON-$NODE-$VMID-$app.$DOMENE"
+      [ -f "$APPS_DIR/$app/.dns_navn" ] && dns_navn=$(cat "$APPS_DIR/$app/.dns_navn")
+      dns_url="http://$dns_navn:$port"
       printf '\033[1m%s\033[0m\n' "$app" >&2
       printf '  IP:  %s\n' "$(link "$ip_url")" >&2
       printf '  DNS: %s  (krever oppsatt navn)\n' "$(link "$dns_url")" >&2
