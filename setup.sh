@@ -236,7 +236,7 @@ get_lan_ip() {
   ip -4 route get 1.1.1.1 2>/dev/null | grep -oP 'src \K[0-9.]+' || hostname -I | awk '{print $1}'
 }
 
-APP_KATALOG="arcane"
+APP_KATALOG="arcane dozzle"
 
 step_apps() {
   msg "App-installasjon"
@@ -306,6 +306,30 @@ EOF
   chown -R "$ADMIN_USER:$ADMIN_USER" "$dir"
   (cd "$dir" && docker compose up -d)
   ok "arcane installert og kjører"
+}
+
+app_port_dozzle() { printf '8080'; }
+
+install_dozzle() {
+  local dir=$APPS_DIR/dozzle
+  if [ -f "$dir/compose.yml" ]; then skip "dozzle er alt satt opp i $dir"; return; fi
+  ensure_docker
+  local port; port=$(app_port_dozzle)
+  install -d -o "$ADMIN_USER" -g "$ADMIN_USER" "$dir"
+  cat > "$dir/compose.yml" <<EOF
+services:
+  dozzle:
+    image: amir20/dozzle:latest
+    container_name: dozzle
+    ports:
+      - $port:8080
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    restart: unless-stopped
+EOF
+  chown -R "$ADMIN_USER:$ADMIN_USER" "$dir"
+  (cd "$dir" && docker compose up -d)
+  ok "dozzle installert og kjører"
 }
 
 print_app_logins() {
