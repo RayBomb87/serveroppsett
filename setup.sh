@@ -154,6 +154,24 @@ step_ssh_hardening() {
   msg "VIKTIG: test i et NYTT vindu at 'ssh $ADMIN_USER@<ip>' virker før du logger ut!"
 }
 
+step_identity() {
+  msg "Server-identitet"
+  if [ -f "$CONF" ]; then
+    . "$CONF"
+    skip "Identitet finnes: $SERVERNAVN"
+    return
+  fi
+  local lok node vmid dom
+  lok=$(ask "Lokasjon (kort, f.eks. sted1)")
+  node=$(ask "Proxmox-node (f.eks. prox1)")
+  vmid=$(ask "VM/CT-id (f.eks. 101)")
+  dom=$(ask "Domene (f.eks. eksempel.no)")
+  SERVERNAVN="$lok-$node-$vmid.$dom"
+  printf 'LOKASJON=%s\nNODE=%s\nVMID=%s\nDOMENE=%s\nSERVERNAVN=%s\n' \
+    "$lok" "$node" "$vmid" "$dom" "$SERVERNAVN" > "$CONF"
+  ok "Identitet lagret i $CONF: $SERVERNAVN"
+}
+
 main() {
   require_root
   detect_os
@@ -162,5 +180,6 @@ main() {
   step_admin_user
   step_ssh_key
   step_ssh_hardening
+  step_identity
 }
 main "$@"
