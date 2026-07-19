@@ -17,6 +17,7 @@ msg()  { printf '\033[1;34m==>\033[0m %s\n' "$*" >&2; }
 ok()   { printf '\033[1;32m ✔\033[0m %s\n' "$*" >&2; }
 skip() { printf '\033[1;33m ↷\033[0m %s (hopper over)\n' "$*" >&2; }
 die()  { printf '\033[1;31mFEIL:\033[0m %s\n' "$*" >&2; exit 1; }
+sep()  { printf '\n----------------------------------------\n' >&2; }
 
 link() { # link "URL" -> klikkbar lenke på stdout (viser rå URL i terminaler uten støtte)
   printf '\033]8;;%s\033\\%s\033]8;;\033\\' "$1" "$1"
@@ -24,21 +25,21 @@ link() { # link "URL" -> klikkbar lenke på stdout (viser rå URL i terminaler u
 
 ask() { # ask "Spørsmål" [default] -> svar på stdout
   local q=$1 def=${2:-} svar
-  printf '\n' >&2
+  sep
   if [ -n "$def" ]; then
     read -rp "$q [$def]: " svar < "$TTY"; printf '%s' "${svar:-$def}"
   else
     while true; do
       read -rp "$q: " svar < "$TTY"
       [ -n "$svar" ] && { printf '%s' "$svar"; return; }
-      printf '\n' >&2
+      sep
     done
   fi
 }
 
 ask_yesno() { # ask_yesno "Spørsmål" -> exit 0=ja 1=nei
   local svar
-  printf '\n' >&2
+  sep
   read -rp "$1 [j/n]: " svar < "$TTY"
   case "$svar" in [jJyY]*) return 0 ;; *) return 1 ;; esac
 }
@@ -69,7 +70,7 @@ show_app_info() { # show_app_info <app> -> henter og viser fersk repo-info fra G
 ask_install_choice() { # ask_install_choice <app> -> exit 0=ja 1=nei (viser info og spør på nytt ved 'i')
   local app=$1 svar
   while true; do
-    printf '\n' >&2
+    sep
     read -rp "Installere $app? [j/n/i=info]: " svar < "$TTY"
     case "$svar" in
       [jJyY]*) return 0 ;;
@@ -88,7 +89,7 @@ pve_menu() {
   msg "Denne serveren er selve Proxmox-hosten, ikke en gjest."
   local valg
   while true; do
-    printf '\n' >&2
+    sep
     printf '  1) Systemendringer på hosten (VE-oppgradering, GPU-drivere, m.m.)\n' >&2
     printf '  2) Opprette og sette opp en ny CT\n' >&2
     printf '  3) Avbryt\n' >&2
@@ -124,7 +125,7 @@ pick_from_list() { # pick_from_list "Spørsmål" item1 item2 ... -> valgt item p
   if [ "${#valg[@]}" -eq 1 ]; then printf '%s' "${valg[0]}"; return 0; fi
   local i svar
   while true; do
-    printf '\n' >&2
+    sep
     printf '%s\n' "$sporsmal" >&2
     for i in "${!valg[@]}"; do printf '  %d) %s\n' "$((i+1))" "${valg[$i]}" >&2; done
     printf '  t) tilbake\n' >&2
@@ -145,7 +146,7 @@ ask_yesno_back() { # ask_yesno_back "Spørsmål" j|n -> 0=ja 1=nei 2=tilbake
   local sporsmal=$1 std=$2 svar hint
   hint=$( [ "$std" = j ] && printf 'J/n' || printf 'j/N' )
   while true; do
-    printf '\n' >&2
+    sep
     read -rp "$sporsmal [$hint/t=tilbake]: " svar < "$TTY"
     svar=${svar:-$std}
     case "$svar" in
@@ -313,7 +314,7 @@ step_ct_bekreft() {
   printf '  Root-passord: %s\n' "$([ "$CT_SET_ROOTPW" -eq 1 ] && echo "settes etter opprettelse" || echo "settes ikke")" >&2
   local svar
   while true; do
-    printf '\n' >&2
+    sep
     read -rp "Opprette CT-en med disse innstillingene? [j/t=tilbake/n=avbryt]: " svar < "$TTY"
     case "$svar" in
       [jJ]*) return 0 ;;
