@@ -59,8 +59,8 @@ step_system() {
   pkg_update
   ok "System oppdatert"
   msg "Sjekker basispakker"
-  pkg_install sudo curl ca-certificates openssl
-  ok "sudo, curl, ca-certificates, openssl på plass"
+  pkg_install sudo curl ca-certificates openssl openssh-server
+  ok "sudo, curl, ca-certificates, openssl, openssh-server på plass"
 }
 
 step_docker() {
@@ -82,20 +82,26 @@ step_docker() {
 step_admin_user() {
   msg "Admin-bruker"
   ADMIN_USER=$(ask "Brukernavn for admin-brukeren")
+  [ "$ADMIN_USER" != root ] || die "Admin-brukeren kan ikke være root — herding stenger root-SSH."
+  [[ "$ADMIN_USER" =~ ^[a-z_][a-z0-9_-]*$ ]] || die "Ugyldig brukernavn (små bokstaver/tall/_/-): $ADMIN_USER"
   if id -u "$ADMIN_USER" >/dev/null 2>&1; then
     skip "Brukeren $ADMIN_USER finnes"
   else
     useradd -m -s /bin/bash "$ADMIN_USER"
     msg "Sett passord for $ADMIN_USER:"
-    passwd "$ADMIN_USER" < "$TTY"
+    until passwd "$ADMIN_USER" < "$TTY"; do msg "Passord ikke satt — prøv igjen:"; done
     ok "Bruker $ADMIN_USER opprettet"
   fi
   local sudogrp=sudo
   getent group sudo >/dev/null || sudogrp=wheel
   usermod -aG "$sudogrp" "$ADMIN_USER"
-  getent group docker >/dev/null && usermod -aG docker "$ADMIN_USER"
+  local grupper=$sudogrp
+  if getent group docker >/dev/null; then
+    usermod -aG docker "$ADMIN_USER"
+    grupper="$sudogrp, docker"
+  fi
   ADMIN_HOME=$(getent passwd "$ADMIN_USER" | cut -d: -f6)
-  ok "$ADMIN_USER er i gruppene: $sudogrp, docker"
+  ok "$ADMIN_USER er i gruppene: $grupper"
 }
 
 step_ssh_key() {
@@ -125,7 +131,8 @@ step_ssh_key() {
 step_ssh_hardening() {
   msg "SSH-herding"
   [ -s "$ADMIN_HOME/.ssh/authorized_keys" ] || die "Ingen nøkkel i authorized_keys — nekter å stenge passordinnlogging."
-  local f=/etc/ssh/sshd_config.d/90-serveroppsett.conf
+  [ -f /etc/ssh/sshd_config ] || die "Fant ikke /etc/ssh/sshd_config — er openssh-server installert?"
+  local f=/etc/ssh/sshd_config.d/00-serveroppsett.conf
   if [ -f "$f" ]; then
     skip "Herding er alt konfigurert ($f)"
   else
@@ -197,7 +204,7 @@ install_arcane() {
   if ask_yesno "Bruke DNS-navn ($SERVERNAVN) i APP_URL? (n = bruk IP)"; then
     app_url="http://arcane.$SERVERNAVN:3552"
   else
-    local ip; ip=$(hostname -I | awk '{print $1}')
+    local ip; ip=$(ip -4 route get 1.1.1.1 2>/dev/null | grep -oP 'src \K[0-9.]+' || hostname -I | awk '{print $1}')
     app_url="http://$ip:3552"
   fi
   install -d -o "$ADMIN_USER" -g "$ADMIN_USER" "$dir"
