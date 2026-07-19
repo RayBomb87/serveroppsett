@@ -63,9 +63,25 @@ step_system() {
   ok "sudo, curl, ca-certificates, openssl på plass"
 }
 
+step_docker() {
+  msg "Docker"
+  if command -v docker >/dev/null; then
+    skip "Docker er installert ($(docker --version))"
+  else
+    curl -fsSL https://get.docker.com | sh
+    ok "Docker installert: $(docker --version)"
+  fi
+  if command -v systemctl >/dev/null; then
+    systemctl enable --now docker >/dev/null 2>&1 || true
+  fi
+  docker compose version >/dev/null 2>&1 || die "docker compose-plugin mangler etter installasjon."
+  ok "Compose: $(docker compose version --short)"
+}
+
 main() {
   require_root
   detect_os
   step_system
+  step_docker
 }
 main "$@"
