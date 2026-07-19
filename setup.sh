@@ -750,7 +750,7 @@ print_app_logins() {
   done
   [ "$funnet" -eq 1 ] || return 0
   [ -f "$CONF" ] && . "$CONF"
-  local ip port ip_url dns_url dns_navn forste=1
+  local ip port ip_url dns_url https_url dns_navn forste=1
   ip=$(get_lan_ip)
   msg "Innloggingslenker for installerte apper:"
   printf '\n' >&2
@@ -763,9 +763,11 @@ print_app_logins() {
       dns_navn="$LOKASJON-$NODE-$VMID-$app.$DOMENE"
       [ -f "$APPS_DIR/$app/.dns_navn" ] && dns_navn=$(cat "$APPS_DIR/$app/.dns_navn")
       dns_url="http://$dns_navn:$port"
+      https_url="https://$dns_navn"
       printf '\033[1m%s\033[0m\n' "$app" >&2
-      printf '  IP:  %s\n' "$(link "$ip_url")" >&2
-      printf '  DNS: %s  (krever oppsatt navn)\n' "$(link "$dns_url")" >&2
+      printf '  IP:    %s\n' "$(link "$ip_url")" >&2
+      printf '  DNS:   %s  (krever oppsatt navn)\n' "$(link "$dns_url")" >&2
+      printf '  HTTPS: %s  (uten port — krever reverse proxy, f.eks. Zoraxy, på 443)\n' "$(link "$https_url")" >&2
     fi
   done
   printf '\n' >&2
