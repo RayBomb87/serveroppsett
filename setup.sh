@@ -71,6 +71,26 @@ ask_install_choice() { # ask_install_choice <app> -> exit 0=ja 1=nei (viser info
 
 require_root() { [ "$(id -u)" -eq 0 ] || die "Kjør som root (eller med sudo)."; }
 
+is_pve_host() { command -v pveversion >/dev/null; }
+
+pve_menu() {
+  msg "Proxmox-vert oppdaget"
+  msg "Denne serveren er selve Proxmox-hosten, ikke en gjest."
+  local valg
+  while true; do
+    printf '  1) Systemendringer på hosten (VE-oppgradering, GPU-drivere, m.m.)\n' >&2
+    printf '  2) Opprette og sette opp en ny CT/VM\n' >&2
+    printf '  3) Avbryt\n' >&2
+    read -rp "Valg [1/2/3]: " valg < "$TTY"
+    case "$valg" in
+      1) skip "Systemendringer på hosten er ikke bygget ennå — kommer i en senere oppdatering."; return ;;
+      2) skip "Opprette CT/VM er ikke bygget ennå — kommer i en senere oppdatering."; return ;;
+      3) msg "Avbryter uten å gjøre endringer."; return ;;
+      *) msg "Ugyldig valg: «$valg» — skriv 1, 2 eller 3." ;;
+    esac
+  done
+}
+
 detect_os() {
   [ -r /etc/os-release ] || die "Fant ikke /etc/os-release — ukjent system."
   . /etc/os-release
@@ -388,6 +408,10 @@ print_app_logins() {
 main() {
   require_root
   detect_os
+  if is_pve_host; then
+    pve_menu
+    exit 0
+  fi
   step_system
   step_docker
   step_admin_user
