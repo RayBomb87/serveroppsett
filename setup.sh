@@ -100,6 +100,7 @@ run_wizard() {
       0) i=$((i+1)) ;;
       1) return 1 ;;
       2) i=$((i-1)) ;;
+      *) return 1 ;;
     esac
   done
   [ "$i" -ge 0 ]
@@ -161,15 +162,25 @@ step_ct_template() {
       local -a maler
       mapfile -t maler < <(pvesm list "$CT_TEMPLATE_STORAGE" --content vztmpl | awk 'NR>1{print $1}')
       local valgt
-      valgt=$(pick_from_list "Velg CT-mal på $CT_TEMPLATE_STORAGE:" "${maler[@]}" "Last ned ny mal fra Proxmox")
-      case $? in
-        2) continue 2 ;;
-      esac
+      if [ "${#maler[@]}" -eq 0 ]; then
+        msg "Ingen maler installert på $CT_TEMPLATE_STORAGE ennå."
+        ask_yesno_back "Laste ned en ny mal fra Proxmox?" j
+        case $? in
+          2) continue 2 ;;
+          1) continue 2 ;;
+        esac
+        valgt="Last ned ny mal fra Proxmox"
+      else
+        valgt=$(pick_from_list "Velg CT-mal på $CT_TEMPLATE_STORAGE:" "${maler[@]}" "Last ned ny mal fra Proxmox")
+        case $? in
+          2) continue 2 ;;
+        esac
+      fi
       if [ "$valgt" = "Last ned ny mal fra Proxmox" ]; then
         msg "Oppdaterer maloversikt fra Proxmox ..."
         pveam update >/dev/null
         local -a tilgjengelig
-        mapfile -t tilgjengelig < <(pveam available --section system | awk 'NR>1{print $2}')
+        mapfile -t tilgjengelig < <(pveam available --section system | awk '{print $2}')
         local nedlasting
         nedlasting=$(pick_from_list "Velg mal å laste ned:" "${tilgjengelig[@]}")
         if [ $? -eq 2 ]; then continue; fi
@@ -293,6 +304,9 @@ step_ct_bekreft() {
 }
 
 create_ct() {
+  # run_wizard MÅ kalles i en betingelse (if/&&/||) — stegene bruker
+  # return 1/2 som normal navigasjon, og det krever at set -e er
+  # slått av for hele kalltreet her.
   if ! run_wizard step_ct_template step_ct_vmid step_ct_hostname step_ct_storage \
                    step_ct_resources step_ct_sikkerhet step_ct_network step_ct_bekreft; then
     msg "CT-oppsett avbrutt."
