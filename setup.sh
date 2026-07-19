@@ -79,16 +79,253 @@ pve_menu() {
   local valg
   while true; do
     printf '  1) Systemendringer på hosten (VE-oppgradering, GPU-drivere, m.m.)\n' >&2
-    printf '  2) Opprette og sette opp en ny CT/VM\n' >&2
+    printf '  2) Opprette og sette opp en ny CT\n' >&2
     printf '  3) Avbryt\n' >&2
     read -rp "Valg [1/2/3]: " valg < "$TTY"
     case "$valg" in
       1) skip "Systemendringer på hosten er ikke bygget ennå — kommer i en senere oppdatering."; return ;;
-      2) skip "Opprette CT/VM er ikke bygget ennå — kommer i en senere oppdatering."; return ;;
+      2) create_ct; return ;;
       3) msg "Avbryter uten å gjøre endringer."; return ;;
       *) msg "Ugyldig valg: «$valg» — skriv 1, 2 eller 3." ;;
     esac
   done
+}
+
+run_wizard() {
+  local -a steps=("$@")
+  local i=0
+  while [ "$i" -ge 0 ] && [ "$i" -lt "${#steps[@]}" ]; do
+    "${steps[$i]}"
+    case $? in
+      0) i=$((i+1)) ;;
+      1) return 1 ;;
+      2) i=$((i-1)) ;;
+    esac
+  done
+  [ "$i" -ge 0 ]
+}
+
+pick_from_list() { # pick_from_list "Spørsmål" item1 item2 ... -> valgt item på stdout, exit 2 ved tilbake
+  local sporsmal=$1; shift
+  local -a valg=("$@")
+  [ "${#valg[@]}" -gt 0 ] || return 1
+  if [ "${#valg[@]}" -eq 1 ]; then printf '%s' "${valg[0]}"; return 0; fi
+  local i svar
+  while true; do
+    printf '%s\n' "$sporsmal" >&2
+    for i in "${!valg[@]}"; do printf '  %d) %s\n' "$((i+1))" "${valg[$i]}" >&2; done
+    printf '  t) tilbake\n' >&2
+    read -rp "Valg: " svar < "$TTY"
+    case "$svar" in
+      t|T) return 2 ;;
+      ''|*[!0-9]*) msg "Ugyldig valg." ;;
+      *) if [ "$svar" -ge 1 ] 2>/dev/null && [ "$svar" -le "${#valg[@]}" ]; then
+           printf '%s' "${valg[$((svar-1))]}"; return 0
+         else
+           msg "Ugyldig valg."
+         fi ;;
+    esac
+  done
+}
+
+ask_yesno_back() { # ask_yesno_back "Spørsmål" j|n -> 0=ja 1=nei 2=tilbake
+  local sporsmal=$1 std=$2 svar hint
+  hint=$( [ "$std" = j ] && printf 'J/n' || printf 'j/N' )
+  while true; do
+    read -rp "$sporsmal [$hint/t=tilbake]: " svar < "$TTY"
+    svar=${svar:-$std}
+    case "$svar" in
+      [jJ]*) return 0 ;;
+      [nN]*) return 1 ;;
+      [tT]) return 2 ;;
+      *) msg "Svar j, n eller t." ;;
+    esac
+  done
+}
+
+pick_storage() { # pick_storage <innholdstype> <spørsmål> -> lagrings-ID på stdout, exit 2 ved tilbake
+  local content=$1 sporsmal=$2
+  local -a lager
+  mapfile -t lager < <(pvesm status --content "$content" --enabled 1 | awk 'NR>1{print $1}')
+  [ "${#lager[@]}" -gt 0 ] || die "Fant ingen lagringsplass med innholdstype «$content» på denne Proxmox-hosten."
+  pick_from_list "$sporsmal" "${lager[@]}"
+}
+
+step_ct_template() {
+  local lager
+  lager=$(pick_storage vztmpl "Hvilken lagringsplass skal sjekkes for CT-maler?")
+  [ $? -eq 2 ] && return 2
+  CT_TEMPLATE_STORAGE=$lager
+  while true; do
+    local -a maler
+    mapfile -t maler < <(pvesm list "$CT_TEMPLATE_STORAGE" --content vztmpl | awk 'NR>1{print $1}')
+    local valgt
+    valgt=$(pick_from_list "Velg CT-mal på $CT_TEMPLATE_STORAGE:" "${maler[@]}" "Last ned ny mal fra Proxmox")
+    case $? in
+      2) return 2 ;;
+    esac
+    if [ "$valgt" = "Last ned ny mal fra Proxmox" ]; then
+      msg "Oppdaterer maloversikt fra Proxmox ..."
+      pveam update >/dev/null
+      local -a tilgjengelig
+      mapfile -t tilgjengelig < <(pveam available --section system | awk 'NR>1{print $2}')
+      local nedlasting
+      nedlasting=$(pick_from_list "Velg mal å laste ned:" "${tilgjengelig[@]}")
+      if [ $? -eq 2 ]; then continue; fi
+      msg "Laster ned $nedlasting ..."
+      pveam download "$CT_TEMPLATE_STORAGE" "$nedlasting" || die "Klarte ikke laste ned malen $nedlasting."
+      continue
+    fi
+    CT_TEMPLATE=$valgt
+    return 0
+  done
+}
+
+step_ct_vmid() {
+  local forslag; forslag=$(pvesh get /cluster/nextid)
+  while true; do
+    CT_VMID=$(ask "VMID for den nye CT-en [t=tilbake]" "$forslag")
+    [ "$CT_VMID" = t ] && return 2
+    [[ "$CT_VMID" =~ ^[0-9]+$ ]] || { msg "Må være tall."; continue; }
+    pct status "$CT_VMID" >/dev/null 2>&1 && { msg "VMID $CT_VMID er alt i bruk — velg et annet."; continue; }
+    return 0
+  done
+}
+
+step_ct_hostname() {
+  while true; do
+    CT_HOSTNAME=$(ask "Hostname for CT-en [t=tilbake]")
+    [ "$CT_HOSTNAME" = t ] && return 2
+    [[ "$CT_HOSTNAME" =~ ^[A-Za-z0-9-]+$ ]] && return 0
+    msg "Ugyldig hostname (kun bokstaver/tall/bindestrek): «$CT_HOSTNAME»"
+  done
+}
+
+step_ct_storage() {
+  local svar; svar=$(pick_storage rootdir "Hvilken lagringsplass skal CT-en ligge på?")
+  [ $? -eq 2 ] && return 2
+  CT_STORAGE=$svar
+  return 0
+}
+
+step_ct_resources() {
+  CT_CORES=$(ask "Antall CPU-kjerner [t=tilbake]" 1)
+  [ "$CT_CORES" = t ] && return 2
+  CT_MEMORY=$(ask "RAM i MB" 512)
+  CT_SWAP=$(ask "Swap i MB" 512)
+  CT_DISK=$(ask "Disk i GB" 8)
+  return 0
+}
+
+step_ct_sikkerhet() {
+  while true; do
+    ask_yesno_back "Opprette som unprivileged container? (anbefalt)" j
+    case $? in
+      2) return 2 ;;
+      0) CT_UNPRIVILEGED=1 ;;
+      1) CT_UNPRIVILEGED=0 ;;
+    esac
+    ask_yesno_back "Sette root-passord på CT-en?" n
+    case $? in
+      2) continue ;;
+      0) CT_SET_ROOTPW=1; return 0 ;;
+      1) CT_SET_ROOTPW=0; return 0 ;;
+    esac
+  done
+}
+
+step_ct_network() {
+  local -a broer
+  mapfile -t broer < <(ip -o link show type bridge | awk -F': ' '{print $2}')
+  [ "${#broer[@]}" -gt 0 ] || die "Fant ingen nettverksbro på denne Proxmox-hosten."
+  while true; do
+    CT_BRIDGE=$(pick_from_list "Velg nettverksbro:" "${broer[@]}")
+    [ $? -eq 2 ] && return 2
+    ask_yesno_back "Bruke DHCP?" j
+    case $? in
+      2) continue ;;
+      0) CT_NET_MODE=dhcp; CT_STATIC_IP=""; CT_GATEWAY=""; return 0 ;;
+      1)
+        CT_STATIC_IP=$(ask_valid "IP-adresse i CIDR-form (f.eks. 10.10.1.99/24)" '^[0-9]{1,3}(\.[0-9]{1,3}){3}/[0-9]{1,2}$' "må være IP/prefiks")
+        CT_GATEWAY=$(ask_valid "Gateway" '^[0-9]{1,3}(\.[0-9]{1,3}){3}$' "må være en IPv4-adresse")
+        CT_NET_MODE=static
+        return 0
+        ;;
+    esac
+  done
+}
+
+step_ct_bekreft() {
+  msg "Oppsummering:"
+  printf '  VMID:         %s\n' "$CT_VMID" >&2
+  printf '  Hostname:     %s\n' "$CT_HOSTNAME" >&2
+  printf '  Mal:          %s\n' "$CT_TEMPLATE" >&2
+  printf '  Lagring:      %s\n' "$CT_STORAGE" >&2
+  printf '  Ressurser:    %s kjerne(r), %s MB RAM, %s MB swap, %s GB disk\n' "$CT_CORES" "$CT_MEMORY" "$CT_SWAP" "$CT_DISK" >&2
+  if [ "$CT_NET_MODE" = dhcp ]; then
+    printf '  Nettverk:     %s, DHCP\n' "$CT_BRIDGE" >&2
+  else
+    printf '  Nettverk:     %s, %s (gw %s)\n' "$CT_BRIDGE" "$CT_STATIC_IP" "$CT_GATEWAY" >&2
+  fi
+  printf '  Unprivileged: %s\n' "$([ "$CT_UNPRIVILEGED" -eq 1 ] && echo ja || echo nei)" >&2
+  printf '  Root-passord: %s\n' "$([ "$CT_SET_ROOTPW" -eq 1 ] && echo "settes etter opprettelse" || echo "settes ikke")" >&2
+  local svar
+  while true; do
+    read -rp "Opprette CT-en med disse innstillingene? [j/t=tilbake/n=avbryt]: " svar < "$TTY"
+    case "$svar" in
+      [jJ]*) return 0 ;;
+      [tT]) return 2 ;;
+      [nN]*) return 1 ;;
+      *) msg "Svar j, t eller n." ;;
+    esac
+  done
+}
+
+create_ct() {
+  if ! run_wizard step_ct_template step_ct_vmid step_ct_hostname step_ct_storage \
+                   step_ct_resources step_ct_sikkerhet step_ct_network step_ct_bekreft; then
+    msg "CT-oppsett avbrutt."
+    return
+  fi
+
+  local netstr
+  if [ "$CT_NET_MODE" = dhcp ]; then
+    netstr="name=eth0,bridge=$CT_BRIDGE,ip=dhcp"
+  else
+    netstr="name=eth0,bridge=$CT_BRIDGE,ip=$CT_STATIC_IP,gw=$CT_GATEWAY"
+  fi
+
+  msg "Oppretter CT $CT_VMID ..."
+  pct create "$CT_VMID" "$CT_TEMPLATE" \
+    --hostname "$CT_HOSTNAME" \
+    --cores "$CT_CORES" --memory "$CT_MEMORY" --swap "$CT_SWAP" \
+    --rootfs "$CT_STORAGE:$CT_DISK" \
+    --net0 "$netstr" \
+    --unprivileged "$CT_UNPRIVILEGED" \
+    --features nesting=1,keyctl=1 \
+    --onboot 1 \
+    || die "pct create feilet."
+  ok "CT $CT_VMID opprettet"
+
+  pct start "$CT_VMID" || die "pct start feilet."
+
+  msg "Venter på at CT $CT_VMID er klar ..."
+  local forsok=0
+  until pct exec "$CT_VMID" -- true 2>/dev/null; do
+    forsok=$((forsok+1))
+    [ "$forsok" -ge 30 ] && die "CT $CT_VMID svarer ikke etter 30 sekunder — sjekk «pct status $CT_VMID» manuelt."
+    sleep 1
+  done
+  ok "CT $CT_VMID er klar"
+
+  if [ "$CT_SET_ROOTPW" -eq 1 ]; then
+    msg "Sett root-passord for CT $CT_VMID:"
+    until pct exec "$CT_VMID" -- passwd < "$TTY"; do msg "Passord ikke satt — prøv igjen:"; done
+  fi
+
+  msg "Bootstrapper CT $CT_VMID (kjører setup.sh inni containeren) ..."
+  pct exec "$CT_VMID" -- bash -c "curl -fsSL https://raw.githubusercontent.com/RayBomb87/serveroppsett/main/setup.sh | bash"
+  ok "CT $CT_VMID ($CT_HOSTNAME) er satt opp."
 }
 
 detect_os() {
