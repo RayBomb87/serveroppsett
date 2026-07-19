@@ -152,32 +152,34 @@ pick_storage() { # pick_storage <innholdstype> <spørsmål> -> lagrings-ID på s
 }
 
 step_ct_template() {
-  local lager
-  lager=$(pick_storage vztmpl "Hvilken lagringsplass skal sjekkes for CT-maler?")
-  [ $? -eq 2 ] && return 2
-  CT_TEMPLATE_STORAGE=$lager
   while true; do
-    local -a maler
-    mapfile -t maler < <(pvesm list "$CT_TEMPLATE_STORAGE" --content vztmpl | awk 'NR>1{print $1}')
-    local valgt
-    valgt=$(pick_from_list "Velg CT-mal på $CT_TEMPLATE_STORAGE:" "${maler[@]}" "Last ned ny mal fra Proxmox")
-    case $? in
-      2) return 2 ;;
-    esac
-    if [ "$valgt" = "Last ned ny mal fra Proxmox" ]; then
-      msg "Oppdaterer maloversikt fra Proxmox ..."
-      pveam update >/dev/null
-      local -a tilgjengelig
-      mapfile -t tilgjengelig < <(pveam available --section system | awk 'NR>1{print $2}')
-      local nedlasting
-      nedlasting=$(pick_from_list "Velg mal å laste ned:" "${tilgjengelig[@]}")
-      if [ $? -eq 2 ]; then continue; fi
-      msg "Laster ned $nedlasting ..."
-      pveam download "$CT_TEMPLATE_STORAGE" "$nedlasting" || die "Klarte ikke laste ned malen $nedlasting."
-      continue
-    fi
-    CT_TEMPLATE=$valgt
-    return 0
+    local lager
+    lager=$(pick_storage vztmpl "Hvilken lagringsplass skal sjekkes for CT-maler?")
+    [ $? -eq 2 ] && return 2
+    CT_TEMPLATE_STORAGE=$lager
+    while true; do
+      local -a maler
+      mapfile -t maler < <(pvesm list "$CT_TEMPLATE_STORAGE" --content vztmpl | awk 'NR>1{print $1}')
+      local valgt
+      valgt=$(pick_from_list "Velg CT-mal på $CT_TEMPLATE_STORAGE:" "${maler[@]}" "Last ned ny mal fra Proxmox")
+      case $? in
+        2) continue 2 ;;
+      esac
+      if [ "$valgt" = "Last ned ny mal fra Proxmox" ]; then
+        msg "Oppdaterer maloversikt fra Proxmox ..."
+        pveam update >/dev/null
+        local -a tilgjengelig
+        mapfile -t tilgjengelig < <(pveam available --section system | awk 'NR>1{print $2}')
+        local nedlasting
+        nedlasting=$(pick_from_list "Velg mal å laste ned:" "${tilgjengelig[@]}")
+        if [ $? -eq 2 ]; then continue; fi
+        msg "Laster ned $nedlasting ..."
+        pveam download "$CT_TEMPLATE_STORAGE" "$nedlasting" || die "Klarte ikke laste ned malen $nedlasting."
+        continue
+      fi
+      CT_TEMPLATE=$valgt
+      return 0
+    done
   done
 }
 
@@ -209,11 +211,20 @@ step_ct_storage() {
 }
 
 step_ct_resources() {
-  CT_CORES=$(ask "Antall CPU-kjerner [t=tilbake]" 1)
-  [ "$CT_CORES" = t ] && return 2
-  CT_MEMORY=$(ask "RAM i MB" 512)
-  CT_SWAP=$(ask "Swap i MB" 512)
-  CT_DISK=$(ask "Disk i GB" 8)
+  local -a felt=(CT_CORES CT_MEMORY CT_SWAP CT_DISK)
+  local -a etikett=("Antall CPU-kjerner" "RAM i MB" "Swap i MB" "Disk i GB")
+  local -a std=(1 512 512 8)
+  local i=0 svar
+  while [ "$i" -ge 0 ] && [ "$i" -lt 4 ]; do
+    svar=$(ask "${etikett[$i]} [t=tilbake]" "${std[$i]}")
+    if [ "$svar" = t ]; then
+      i=$((i-1))
+      continue
+    fi
+    printf -v "${felt[$i]}" '%s' "$svar"
+    i=$((i+1))
+  done
+  [ "$i" -ge 0 ] || return 2
   return 0
 }
 
@@ -324,7 +335,8 @@ create_ct() {
   fi
 
   msg "Bootstrapper CT $CT_VMID (kjører setup.sh inni containeren) ..."
-  pct exec "$CT_VMID" -- bash -c "curl -fsSL https://raw.githubusercontent.com/RayBomb87/serveroppsett/main/setup.sh | bash"
+  pct exec "$CT_VMID" -- bash -c "curl -fsSL https://raw.githubusercontent.com/RayBomb87/serveroppsett/main/setup.sh | bash" \
+    || die "Bootstrapping av CT $CT_VMID feilet — sjekk pct exec-loggen over."
   ok "CT $CT_VMID ($CT_HOSTNAME) er satt opp."
 }
 
