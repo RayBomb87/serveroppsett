@@ -79,10 +79,30 @@ step_docker() {
   ok "Compose: $(docker compose version --short)"
 }
 
+step_admin_user() {
+  msg "Admin-bruker"
+  ADMIN_USER=$(ask "Brukernavn for admin-brukeren")
+  if id -u "$ADMIN_USER" >/dev/null 2>&1; then
+    skip "Brukeren $ADMIN_USER finnes"
+  else
+    useradd -m -s /bin/bash "$ADMIN_USER"
+    msg "Sett passord for $ADMIN_USER:"
+    passwd "$ADMIN_USER" < "$TTY"
+    ok "Bruker $ADMIN_USER opprettet"
+  fi
+  local sudogrp=sudo
+  getent group sudo >/dev/null || sudogrp=wheel
+  usermod -aG "$sudogrp" "$ADMIN_USER"
+  getent group docker >/dev/null && usermod -aG docker "$ADMIN_USER"
+  ADMIN_HOME=$(getent passwd "$ADMIN_USER" | cut -d: -f6)
+  ok "$ADMIN_USER er i gruppene: $sudogrp, docker"
+}
+
 main() {
   require_root
   detect_os
   step_system
   step_docker
+  step_admin_user
 }
 main "$@"
