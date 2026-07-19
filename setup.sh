@@ -147,7 +147,7 @@ ask_yesno_back() { # ask_yesno_back "Spørsmål" j|n -> 0=ja 1=nei 2=tilbake
 pick_storage() { # pick_storage <innholdstype> <spørsmål> -> lagrings-ID på stdout, exit 2 ved tilbake
   local content=$1 sporsmal=$2
   local -a lager
-  mapfile -t lager < <(pvesm status --content "$content" --enabled 1 | awk 'NR>1{print $1}')
+  mapfile -t lager < <(pvesm status --content "$content" --enabled 1 2>/dev/null | awk 'NR>1{print $1}')
   [ "${#lager[@]}" -gt 0 ] || die "Fant ingen lagringsplass med innholdstype «$content» på denne Proxmox-hosten."
   pick_from_list "$sporsmal" "${lager[@]}"
 }
