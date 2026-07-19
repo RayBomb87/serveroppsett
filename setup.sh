@@ -40,8 +40,32 @@ detect_os() {
   ok "System: $PRETTY_NAME (pakkehåndterer: $PKG)"
 }
 
+pkg_update() {
+  case "$PKG" in
+    apt) DEBIAN_FRONTEND=noninteractive apt-get update -q && DEBIAN_FRONTEND=noninteractive apt-get upgrade -y -q ;;
+    dnf) dnf upgrade -y -q ;;
+  esac
+}
+
+pkg_install() {
+  case "$PKG" in
+    apt) DEBIAN_FRONTEND=noninteractive apt-get install -y -q "$@" ;;
+    dnf) dnf install -y -q "$@" ;;
+  esac
+}
+
+step_system() {
+  msg "Oppdaterer systemet"
+  pkg_update
+  ok "System oppdatert"
+  msg "Sjekker basispakker"
+  pkg_install sudo curl ca-certificates openssl
+  ok "sudo, curl, ca-certificates, openssl på plass"
+}
+
 main() {
   require_root
   detect_os
+  step_system
 }
 main "$@"
