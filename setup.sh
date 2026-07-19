@@ -158,14 +158,19 @@ step_identity() {
   msg "Server-identitet"
   if [ -f "$CONF" ]; then
     . "$CONF"
+    [ -n "${SERVERNAVN:-}" ] || die "Korrupt $CONF (mangler SERVERNAVN) — slett fila og kjør på nytt."
     skip "Identitet finnes: $SERVERNAVN"
     return
   fi
   local lok node vmid dom
   lok=$(ask "Lokasjon (kort, f.eks. sted1)")
+  [[ "$lok" =~ ^[A-Za-z0-9-]+$ ]] || die "Ugyldig lokasjon (kun bokstaver/tall/bindestrek): $lok"
   node=$(ask "Proxmox-node (f.eks. prox1)")
+  [[ "$node" =~ ^[A-Za-z0-9-]+$ ]] || die "Ugyldig node (kun bokstaver/tall/bindestrek): $node"
   vmid=$(ask "VM/CT-id (f.eks. 101)")
+  [[ "$vmid" =~ ^[0-9]+$ ]] || die "Ugyldig VM/CT-id (kun tall): $vmid"
   dom=$(ask "Domene (f.eks. eksempel.no)")
+  [[ "$dom" =~ ^[A-Za-z0-9.-]+$ ]] || die "Ugyldig domene (kun bokstaver/tall/punktum/bindestrek): $dom"
   SERVERNAVN="$lok-$node-$vmid.$dom"
   printf 'LOKASJON=%s\nNODE=%s\nVMID=%s\nDOMENE=%s\nSERVERNAVN=%s\n' \
     "$lok" "$node" "$vmid" "$dom" "$SERVERNAVN" > "$CONF"
