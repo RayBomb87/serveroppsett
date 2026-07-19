@@ -98,11 +98,31 @@ step_admin_user() {
   ok "$ADMIN_USER er i gruppene: $sudogrp, docker"
 }
 
+step_ssh_key() {
+  msg "SSH-nøkkel for $ADMIN_USER"
+  local keyfile=$ADMIN_HOME/.ssh/authorized_keys nokler
+  if ask_yesno "Hente offentlige nøkler fra en GitHub-konto?"; then
+    local ghuser; ghuser=$(ask "GitHub-brukernavn")
+    nokler=$(curl -fsSL "https://github.com/$ghuser.keys") || die "Klarte ikke hente nøkler for $ghuser."
+    [ -n "$nokler" ] || die "GitHub-kontoen $ghuser har ingen offentlige nøkler."
+  else
+    nokler=$(ask "Lim inn offentlig nøkkel (ssh-ed25519 ...)")
+  fi
+  install -d -m 700 -o "$ADMIN_USER" -g "$ADMIN_USER" "$ADMIN_HOME/.ssh"
+  touch "$keyfile"
+  while IFS= read -r n; do
+    [ -z "$n" ] && continue
+    grep -qxF "$n" "$keyfile" && skip "Nøkkel ligger der fra før" || { printf '%s\n' "$n" >> "$keyfile"; ok "Nøkkel lagt til"; }
+  done <<< "$nokler"
+  chown "$ADMIN_USER:$ADMIN_USER" "$keyfile" && chmod 600 "$keyfile"
+}
+
 main() {
   require_root
   detect_os
   step_system
   step_docker
   step_admin_user
+  step_ssh_key
 }
 main "$@"
