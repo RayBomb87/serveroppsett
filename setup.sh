@@ -112,9 +112,14 @@ step_ssh_key() {
   touch "$keyfile"
   while IFS= read -r n; do
     [ -z "$n" ] && continue
+    case "$n" in
+      ssh-ed25519\ *|ssh-rsa\ *|ecdsa-sha2-*|sk-ssh-*|sk-ecdsa-*) ;;
+      *) die "Ugyldig SSH-nøkkel (må starte med ssh-ed25519/ssh-rsa/...): «$n»" ;;
+    esac
     grep -qxF "$n" "$keyfile" && skip "Nøkkel ligger der fra før" || { printf '%s\n' "$n" >> "$keyfile"; ok "Nøkkel lagt til"; }
   done <<< "$nokler"
-  chown "$ADMIN_USER:$ADMIN_USER" "$keyfile" && chmod 600 "$keyfile"
+  chown "$ADMIN_USER:$ADMIN_USER" "$keyfile" || die "chown av authorized_keys feilet."
+  chmod 600 "$keyfile" || die "chmod av authorized_keys feilet."
 }
 
 main() {
