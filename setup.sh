@@ -664,12 +664,22 @@ install_arcane() {
   uid=$(id -u "$ADMIN_USER"); gid=$(id -g "$ADMIN_USER")
   ip=$(get_lan_ip)
   port=$(app_port_arcane)
+  local dns_navn="$LOKASJON-$NODE-$VMID-arcane.$DOMENE" valg
   printf '\n' >&2
-  if ask_yesno "Bruke DNS-navn ($LOKASJON-$NODE-$VMID-arcane.$DOMENE) i APP_URL? (n = bruk IP)"; then
-    app_url="http://$LOKASJON-$NODE-$VMID-arcane.$DOMENE:$port"
-  else
-    app_url="http://$ip:$port"
-  fi
+  printf 'Hvilken adresse skal Arcane bruke i APP_URL?\n' >&2
+  printf '  1) DNS-navn (%s)\n' "$dns_navn" >&2
+  printf '  2) IP (%s)\n' "$ip" >&2
+  printf '  3) Egendefinert\n' >&2
+  read -rp "Valg [1]: " valg < "$TTY"
+  case "${valg:-1}" in
+    2) app_url="http://$ip:$port" ;;
+    3)
+      printf '\n' >&2
+      local egendef; egendef=$(ask_valid "Egendefinert adresse (uten http:// og port)" '^[A-Za-z0-9.-]+$' "kun bokstaver/tall/punktum/bindestrek")
+      app_url="http://$egendef:$port"
+      ;;
+    *) app_url="http://$dns_navn:$port" ;;
+  esac
   install -d -o "$ADMIN_USER" -g "$ADMIN_USER" "$dir"
   printf 'ENCRYPTION_KEY=%s\nJWT_SECRET=%s\n' "$(openssl rand -hex 32)" "$(openssl rand -hex 32)" > "$dir/.env"
   chmod 600 "$dir/.env"
