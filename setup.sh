@@ -28,6 +28,15 @@ ask_yesno() { # ask_yesno "Spørsmål" -> exit 0=ja 1=nei
   case "$svar" in [jJyY]*) return 0 ;; *) return 1 ;; esac
 }
 
+ask_valid() { # ask_valid "Spørsmål" "regex" "feilhint" -> svar (spør på nytt til gyldig)
+  local q=$1 re=$2 hint=$3 svar
+  while true; do
+    svar=$(ask "$q")
+    [[ "$svar" =~ $re ]] && { printf '%s' "$svar"; return; }
+    msg "Ugyldig verdi ($hint): «$svar» — prøv igjen."
+  done
+}
+
 require_root() { [ "$(id -u)" -eq 0 ] || die "Kjør som root (eller med sudo)."; }
 
 detect_os() {
@@ -81,9 +90,11 @@ step_docker() {
 
 step_admin_user() {
   msg "Admin-bruker"
-  ADMIN_USER=$(ask "Brukernavn for admin-brukeren")
-  [ "$ADMIN_USER" != root ] || die "Admin-brukeren kan ikke være root — herding stenger root-SSH."
-  [[ "$ADMIN_USER" =~ ^[a-z_][a-z0-9_-]*$ ]] || die "Ugyldig brukernavn (små bokstaver/tall/_/-): $ADMIN_USER"
+  while true; do
+    ADMIN_USER=$(ask_valid "Brukernavn for admin-brukeren" '^[a-z_][a-z0-9_-]*$' "små bokstaver/tall/_/-")
+    [ "$ADMIN_USER" != root ] && break
+    msg "Admin-brukeren kan ikke være root — herding stenger root-SSH. Velg et annet navn."
+  done
   if id -u "$ADMIN_USER" >/dev/null 2>&1; then
     skip "Brukeren $ADMIN_USER finnes"
   else
@@ -112,7 +123,7 @@ step_ssh_key() {
     nokler=$(curl -fsSL "https://github.com/$ghuser.keys") || die "Klarte ikke hente nøkler for $ghuser."
     [ -n "$nokler" ] || die "GitHub-kontoen $ghuser har ingen offentlige nøkler."
   else
-    nokler=$(ask "Lim inn offentlig nøkkel (ssh-ed25519 ...)")
+    nokler=$(ask_valid "Lim inn offentlig nøkkel (ssh-ed25519 ...)" '^(ssh-ed25519 |ssh-rsa |ecdsa-sha2-|sk-ssh-|sk-ecdsa-)' "må starte med ssh-ed25519/ssh-rsa/...")
   fi
   install -d -m 700 -o "$ADMIN_USER" -g "$ADMIN_USER" "$ADMIN_HOME/.ssh"
   touch "$keyfile"
@@ -170,14 +181,10 @@ step_identity() {
     return
   fi
   local lok node vmid dom
-  lok=$(ask "Lokasjon (kort, f.eks. sted1)")
-  [[ "$lok" =~ ^[A-Za-z0-9-]+$ ]] || die "Ugyldig lokasjon (kun bokstaver/tall/bindestrek): $lok"
-  node=$(ask "Proxmox-node (f.eks. prox1)")
-  [[ "$node" =~ ^[A-Za-z0-9-]+$ ]] || die "Ugyldig node (kun bokstaver/tall/bindestrek): $node"
-  vmid=$(ask "VM/CT-id (f.eks. 101)")
-  [[ "$vmid" =~ ^[0-9]+$ ]] || die "Ugyldig VM/CT-id (kun tall): $vmid"
-  dom=$(ask "Domene (f.eks. eksempel.no)")
-  [[ "$dom" =~ ^[A-Za-z0-9.-]+$ ]] || die "Ugyldig domene (kun bokstaver/tall/punktum/bindestrek): $dom"
+  lok=$(ask_valid "Lokasjon (kort, f.eks. sted1)" '^[A-Za-z0-9-]+$' "kun bokstaver/tall/bindestrek")
+  node=$(ask_valid "Proxmox-node (f.eks. prox1)" '^[A-Za-z0-9-]+$' "kun bokstaver/tall/bindestrek")
+  vmid=$(ask_valid "VM/CT-id (f.eks. 101)" '^[0-9]+$' "kun tall")
+  dom=$(ask_valid "Domene (f.eks. eksempel.no)" '^[A-Za-z0-9.-]+$' "kun bokstaver/tall/punktum/bindestrek")
   SERVERNAVN="$lok-$node-$vmid.$dom"
   printf 'LOKASJON=%s\nNODE=%s\nVMID=%s\nDOMENE=%s\nSERVERNAVN=%s\n' \
     "$lok" "$node" "$vmid" "$dom" "$SERVERNAVN" > "$CONF"
