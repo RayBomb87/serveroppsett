@@ -367,7 +367,10 @@ create_ct() {
 
   msg "Bootstrapper CT $CT_VMID (kjører setup.sh inni containeren) ..."
   local raw_url=https://raw.githubusercontent.com/RayBomb87/serveroppsett/main/setup.sh
+  local node_naam; node_naam=$(hostname)
   pct exec "$CT_VMID" -- bash -c "
+    export SERVEROPPSETT_VMID_HINT='$CT_VMID'
+    export SERVEROPPSETT_NODE_HINT='$node_naam'
     set -euo pipefail
     if ! command -v curl >/dev/null && ! command -v wget >/dev/null; then
       if command -v apt-get >/dev/null; then
@@ -544,10 +547,14 @@ step_ssh_hardening() {
       die "sshd-konfig feilet validering — endringen er rullet tilbake."
     fi
     [ -n "$backup" ] && rm -f "$backup"
-    if systemctl reload ssh 2>/dev/null || systemctl reload sshd 2>/dev/null; then
-      ok "Root-SSH og passordinnlogging er stengt (kun nøkkel nå)"
+    if systemctl enable --now ssh 2>/dev/null || systemctl enable --now sshd 2>/dev/null; then
+      if systemctl reload ssh 2>/dev/null || systemctl reload sshd 2>/dev/null; then
+        ok "Root-SSH og passordinnlogging er stengt (kun nøkkel nå)"
+      else
+        msg "ADVARSEL: fikk ikke lastet sshd på nytt automatisk — kjør 'systemctl reload sshd' manuelt; herdingen gjelder først etter reload."
+      fi
     else
-      msg "ADVARSEL: fikk ikke lastet sshd på nytt automatisk — kjør 'systemctl reload sshd' manuelt; herdingen gjelder først etter reload."
+      msg "ADVARSEL: fikk ikke aktivert/startet SSH-tjenesten automatisk — kjør 'systemctl enable --now sshd' manuelt; herdingen gjelder først da."
     fi
   fi
   msg "VIKTIG: test i et NYTT vindu at 'ssh $ADMIN_USER@<ip>' virker før du logger ut!"
@@ -563,8 +570,8 @@ step_identity() {
   fi
   local lok node vmid dom
   lok=$(ask_valid "Lokasjon (kort, f.eks. sted1)" '^[A-Za-z0-9-]+$' "kun bokstaver/tall/bindestrek")
-  node=$(ask_valid "Proxmox-node (f.eks. prox1)" '^[A-Za-z0-9-]+$' "kun bokstaver/tall/bindestrek")
-  vmid=$(ask_valid "VM/CT-id (f.eks. 101)" '^[0-9]+$' "kun tall")
+  node=$(ask_valid "Proxmox-node (f.eks. prox1)" '^[A-Za-z0-9-]+$' "kun bokstaver/tall/bindestrek" "${SERVEROPPSETT_NODE_HINT:-}")
+  vmid=$(ask_valid "VM/CT-id (f.eks. 101)" '^[0-9]+$' "kun tall" "${SERVEROPPSETT_VMID_HINT:-}")
   dom=$(ask_valid "Domene (f.eks. eksempel.no)" '^[A-Za-z0-9.-]+$' "kun bokstaver/tall/punktum/bindestrek")
   SERVERNAVN="$lok-$node-$vmid.$dom"
   printf 'LOKASJON=%s\nNODE=%s\nVMID=%s\nDOMENE=%s\nSERVERNAVN=%s\n' \
