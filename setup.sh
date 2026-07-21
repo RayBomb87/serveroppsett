@@ -699,6 +699,11 @@ install_arcane() {
   install -d -o "$ADMIN_USER" -g "$ADMIN_USER" "$dir"
   printf 'ENCRYPTION_KEY=%s\nJWT_SECRET=%s\n' "$(openssl rand -hex 32)" "$(openssl rand -hex 32)" > "$dir/.env"
   chmod 600 "$dir/.env"
+  # Arcane stoler KUN på APP_URL som gyldig CORS/CSRF-origin (cors_middleware.go/
+  # csrf_middleware.go) — innlogging via en annen adresse enn den valgt her vil
+  # bli avvist med "Cross-origin request blocked". Lagres slik at print_app_logins
+  # kan vise riktig (og eneste faktisk fungerende) adresse.
+  printf '%s' "$app_url" > "$dir/.app_url_valgt"
   cat > "$dir/compose.yml" <<EOF
 services:
   arcane:
@@ -812,6 +817,12 @@ print_app_logins() {
       printf '\033[1m%s\033[0m\n' "$app" >&2
       if [ -z "$port" ]; then
         printf '  Ingen web-UI — kjører i bakgrunnen (network_mode: host)\n' >&2
+      elif [ -f "$APPS_DIR/$app/.app_url_valgt" ]; then
+        # Appen stoler kun på denne ene origin (satt som APP_URL/tilsvarende ved
+        # installasjon) — andre adresser kan gi CORS/CSRF-feil ved innlogging.
+        printf '  Adresse: %s  (eneste adresse appen godtar — valgt ved installasjon)\n' "$(link "$(cat "$APPS_DIR/$app/.app_url_valgt")")" >&2
+        login=$("app_login_$app" 2>/dev/null) || login=''
+        [ -n "$login" ] && printf '  Innlogging: %s\n' "$login" >&2
       else
         ip_url="http://$ip:$port"
         dns_navn="$LOKASJON-$NODE-$VMID-$app.$DOMENE"
