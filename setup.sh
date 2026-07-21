@@ -450,6 +450,28 @@ step_system() {
   ok "sudo, curl, ca-certificates, openssl, openssh-server på plass"
 }
 
+step_locale() {
+  sep
+  msg "UTF-8-locale (æøå m.m. i f.eks. nano)"
+  local f
+  case "$PKG" in
+    apt) f=/etc/default/locale ;;
+    dnf) f=/etc/locale.conf ;;
+  esac
+  if [ -f "$f" ] && grep -qx 'LANG=C.UTF-8' "$f" 2>/dev/null; then
+    skip "UTF-8-locale er alt satt (LANG=C.UTF-8 i $f)"
+    return
+  fi
+  # C.UTF-8 er innebygd i glibc på moderne Debian/Ubuntu/Fedora — krever
+  # ingen locale-gen/ekstra pakke, i motsetning til f.eks. en_US.UTF-8.
+  if ! locale -a 2>/dev/null | grep -qiE '^C\.utf-?8$'; then
+    msg "ADVARSEL: fant ingen C.UTF-8-locale på dette systemet — æøå kan fortsatt feile i terminalprogrammer som nano."
+    return
+  fi
+  printf 'LANG=C.UTF-8\nLC_ALL=C.UTF-8\n' > "$f"
+  ok "LANG/LC_ALL satt til C.UTF-8 i $f — gjelder fra neste SSH-innlogging (logg ut/inn på nytt for å få effekten)"
+}
+
 install_docker_engine() {
   if command -v docker >/dev/null; then
     skip "Docker er installert ($(docker --version)) — holdes oppdatert automatisk via systemoppdateringen"
@@ -881,6 +903,7 @@ main() {
     exit 0
   fi
   step_system
+  step_locale
   step_docker
   step_admin_user
   step_ssh_key
