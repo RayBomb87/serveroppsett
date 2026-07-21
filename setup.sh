@@ -981,9 +981,9 @@ main() {
   step_apps
   print_app_logins
   if [ "${SSH_PORT:-22}" != "22" ]; then
-    ok "Ferdig! Logg inn som $ADMIN_USER med SSH-nøkkel: ssh -p $SSH_PORT $ADMIN_USER@$(get_lan_ip)  (SSH-port: $SSH_PORT)"
+    ok "Ferdig! Logg inn med: ssh -p $SSH_PORT $ADMIN_USER@$(get_lan_ip)  (SSH-port: $SSH_PORT, ikke standard 22)"
   else
-    ok "Ferdig! Logg inn som $ADMIN_USER med SSH-nøkkel på standardport 22."
+    ok "Ferdig! Logg inn med: ssh $ADMIN_USER@$(get_lan_ip)"
   fi
 }
 main "$@"
