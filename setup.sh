@@ -711,8 +711,9 @@ step_ssh_hardening() {
   fi
   SSH_PORT=$(grep -oE '^Port [0-9]+' "$f" 2>/dev/null | awk '{print $2}') || true
   SSH_PORT=${SSH_PORT:-22}
-  local sshkomm="ssh $ADMIN_USER@<ip>"
-  [ "$SSH_PORT" != "22" ] && sshkomm="ssh -p $SSH_PORT $ADMIN_USER@<ip>"
+  local ip; ip=$(get_lan_ip)
+  local sshkomm="ssh $ADMIN_USER@$ip"
+  [ "$SSH_PORT" != "22" ] && sshkomm="ssh -p $SSH_PORT $ADMIN_USER@$ip"
   msg "VIKTIG: test i et NYTT vindu at '$sshkomm' virker før du logger ut!"
 }
 
@@ -980,7 +981,7 @@ main() {
   step_apps
   print_app_logins
   if [ "${SSH_PORT:-22}" != "22" ]; then
-    ok "Ferdig! Logg inn som $ADMIN_USER med SSH-nøkkel: ssh -p $SSH_PORT $ADMIN_USER@<ip>  (SSH-port: $SSH_PORT)"
+    ok "Ferdig! Logg inn som $ADMIN_USER med SSH-nøkkel: ssh -p $SSH_PORT $ADMIN_USER@$(get_lan_ip)  (SSH-port: $SSH_PORT)"
   else
     ok "Ferdig! Logg inn som $ADMIN_USER med SSH-nøkkel på standardport 22."
   fi
