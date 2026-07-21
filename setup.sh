@@ -677,6 +677,7 @@ step_apps() {
 
 app_port_arcane() { printf '3552'; }
 app_repo_arcane() { printf 'getarcaneapp/arcane'; }
+app_login_arcane() { printf 'arcane / arcane-admin (du blir bedt om å bytte passord ved første innlogging)'; }
 
 install_arcane() {
   local dir=$APPS_DIR/arcane
@@ -791,7 +792,7 @@ print_app_logins() {
   done
   [ "$funnet" -eq 1 ] || return 0
   [ -f "$CONF" ] && . "$CONF"
-  local ip port ip_url dns_url https_url dns_navn forste=1
+  local ip port ip_url dns_url https_url dns_navn login forste=1
   ip=$(get_lan_ip)
   msg "Innloggingslenker for installerte apper:"
   printf '\n' >&2
@@ -812,6 +813,8 @@ print_app_logins() {
         printf '  IP:    %s\n' "$(link "$ip_url")" >&2
         printf '  DNS:   %s  (krever oppsatt navn)\n' "$(link "$dns_url")" >&2
         printf '  HTTPS: %s  (uten port — krever reverse proxy, f.eks. Zoraxy, på 443)\n' "$(link "$https_url")" >&2
+        login=$("app_login_$app" 2>/dev/null) || login=''
+        [ -n "$login" ] && printf '  Innlogging: %s\n' "$login" >&2
       fi
     fi
   done
