@@ -661,7 +661,7 @@ step_apps() {
     printf 'APPS_DIR=%s\nAPPS_OWNER=%s\n' "$APPS_DIR" "$ADMIN_USER" > "$APPS_CONF"
   fi
   install -d -o "$owner" -g "$owner" "$(dirname "$APPS_DIR")" "$APPS_DIR"
-  local app forste=1
+  local app forste=1 nye_andre_apper=0
   for app in $APP_KATALOG; do
     if [ -f "$APPS_DIR/$app/compose.yml" ]; then
       skip "$app er alt satt opp i $APPS_DIR/$app — spør ikke på nytt"
@@ -670,9 +670,17 @@ step_apps() {
       forste=0
       if ask_install_choice "$app"; then
         "install_$app"
+        [ "$app" = "arcane" ] || nye_andre_apper=1
       fi
     fi
   done
+  # Arcane skanner /app/data/projects kun ved oppstart (ingen pålitelig
+  # live-overvåking av bind-mounten) — nyinstallerte apper i samme kjøring
+  # vises derfor ikke som prosjekt før Arcane restartes.
+  if [ "$nye_andre_apper" -eq 1 ] && [ -f "$APPS_DIR/arcane/compose.yml" ]; then
+    (cd "$APPS_DIR/arcane" && docker compose restart) >/dev/null 2>&1 || true
+    ok "Arcane restartet slik at nye apper vises i prosjektoversikten"
+  fi
 }
 
 app_port_arcane() { printf '3552'; }
