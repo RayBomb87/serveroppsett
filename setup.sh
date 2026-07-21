@@ -614,8 +614,36 @@ sporsmal_ny_ssh_port() { # sporsmal_ny_ssh_port <naavaerende_port> — setter gl
   return 0
 }
 
+ssh_socket_enhet() { # -> navnet på aktiv ssh-socket-enhet på stdout (ssh.socket/sshd.socket), tom streng hvis systemet ikke bruker socket-aktivering
+  local navn
+  for navn in ssh.socket sshd.socket; do
+    if systemctl list-unit-files "$navn" >/dev/null 2>&1 \
+      && { systemctl is-active "$navn" >/dev/null 2>&1 || systemctl is-enabled "$navn" >/dev/null 2>&1; }; then
+      printf '%s' "$navn"
+      return 0
+    fi
+  done
+  return 0
+}
+
+konfigurer_ssh_socket_port() { # konfigurer_ssh_socket_port <port> — oppdaterer ssh.socket/sshd.socket sin ListenStream
+  # Moderne Debian/Ubuntu lar systemd binde SSH-porten via en egen .socket-enhet
+  # og gir den videre til sshd — da blir "Port" i sshd_config IGNORERT helt.
+  # RPM-baserte distroer (Fedora/RHEL/Rocky m.fl.) bruker normalt IKKE dette —
+  # der er sshd_config sin Port-linje alt som trengs, og denne funksjonen er en no-op.
+  local port=${1:-22} enhet
+  enhet=$(ssh_socket_enhet)
+  [ -n "$enhet" ] || return 0
+  local d="/etc/systemd/system/$enhet.d"
+  install -d -m 755 "$d"
+  printf '[Socket]\nListenStream=\nListenStream=%s\n' "$port" > "$d/00-serveroppsett.conf"
+  systemctl daemon-reload
+  systemctl restart "$enhet" 2>/dev/null || true
+}
+
 skriv_ssh_herding_fil() { # skriv_ssh_herding_fil <portlinje> <f> — skriver, validerer, restarter sshd; ruller tilbake ved valideringsfeil
-  local portlinje=$1 f=$2 forrige=""
+  local portlinje=$1 f=$2 forrige="" port=22
+  [ -n "$portlinje" ] && port=${portlinje#Port }
   [ -f "$f" ] && forrige=$(cat "$f")
   {
     printf 'PermitRootLogin no\nPasswordAuthentication no\n'
@@ -625,6 +653,7 @@ skriv_ssh_herding_fil() { # skriv_ssh_herding_fil <portlinje> <f> — skriver, v
     if [ -n "$forrige" ]; then printf '%s\n' "$forrige" > "$f"; else rm -f "$f"; fi
     die "sshd-konfig feilet validering — endringen er rullet tilbake."
   fi
+  konfigurer_ssh_socket_port "$port"
   if systemctl restart ssh 2>/dev/null || systemctl restart sshd 2>/dev/null; then
     ok "sshd restartet — ${portlinje:-standard SSH-port 22} er nå aktiv"
     msg "VIKTIG: test i et NYTT vindu at innlogging på den nye porten virker FØR du logger ut av denne økten!"
@@ -668,6 +697,7 @@ step_ssh_hardening() {
       die "sshd-konfig feilet validering — endringen er rullet tilbake."
     fi
     [ -n "$backup" ] && rm -f "$backup"
+    konfigurer_ssh_socket_port "${nyport:-22}"
     if systemctl enable --now ssh 2>/dev/null || systemctl enable --now sshd 2>/dev/null; then
       if systemctl restart ssh 2>/dev/null || systemctl restart sshd 2>/dev/null; then
         ok "Root-SSH og passordinnlogging er stengt (kun nøkkel nå)"
