@@ -643,7 +643,7 @@ pick_app_url() { # pick_app_url <app> -> hostname (uten protokoll/port) på stdo
   esac
 }
 
-APP_KATALOG="arcane dozzle"
+APP_KATALOG="arcane dozzle airconnect-cast airconnect-upnp"
 
 step_apps() {
   sep
@@ -743,6 +743,47 @@ EOF
   ok "dozzle installert og kjører"
 }
 
+app_port_airconnect-cast() { printf ''; }
+app_port_airconnect-upnp() { printf ''; }
+app_repo_airconnect-cast() { printf 'GioF71/airconnect-docker'; }
+app_repo_airconnect-upnp() { printf 'GioF71/airconnect-docker'; }
+
+_install_airconnect() { # _install_airconnect <cast|upnp> — bygger og starter én airconnect-variant
+  local mode=$1
+  local app="airconnect-$mode"
+  local dir=$APPS_DIR/$app
+  if [ -f "$dir/compose.yml" ]; then skip "$app er alt satt opp i $dir"; return; fi
+  ensure_docker
+  local uid gid
+  uid=$(id -u "$ADMIN_USER"); gid=$(id -g "$ADMIN_USER")
+  install -d -o "$ADMIN_USER" -g "$ADMIN_USER" "$dir" "$dir/config"
+  printf 'PUID=%s\nPGID=%s\nAIRCONNECT_MODE=%s\n' "$uid" "$gid" "$mode" > "$dir/.env"
+  chmod 600 "$dir/.env"
+  cat > "$dir/compose.yml" <<EOF
+services:
+  airconnect:
+    image: giof71/airconnect:latest
+    container_name: $app
+    network_mode: host
+    environment:
+      - PUID=\${PUID}
+      - PGID=\${PGID}
+      - AIRCONNECT_MODE=\${AIRCONNECT_MODE}
+    volumes:
+      - ./config:/config
+    restart: unless-stopped
+EOF
+  chown -R "$ADMIN_USER:$ADMIN_USER" "$dir"
+  (cd "$dir" && docker compose up -d)
+  ok "$app installert og kjører"
+}
+
+# airconnect-cast bygger bro mellom AirPlay og Chromecast-enheter,
+# airconnect-upnp mellom AirPlay og UPnP/DLNA-enheter (f.eks. upmpdcli/mpd).
+# Begge kan installeres samtidig (APP_KATALOG spør om hver for seg).
+install_airconnect-cast() { _install_airconnect cast; }
+install_airconnect-upnp() { _install_airconnect upnp; }
+
 print_app_logins() {
   local app funnet=0
   for app in $APP_KATALOG; do
@@ -759,15 +800,19 @@ print_app_logins() {
       [ "$forste" -eq 1 ] || printf -- '----------------------------------------\n' >&2
       forste=0
       port=$("app_port_$app")
-      ip_url="http://$ip:$port"
-      dns_navn="$LOKASJON-$NODE-$VMID-$app.$DOMENE"
-      [ -f "$APPS_DIR/$app/.dns_navn" ] && dns_navn=$(cat "$APPS_DIR/$app/.dns_navn")
-      dns_url="http://$dns_navn:$port"
-      https_url="https://$dns_navn"
       printf '\033[1m%s\033[0m\n' "$app" >&2
-      printf '  IP:    %s\n' "$(link "$ip_url")" >&2
-      printf '  DNS:   %s  (krever oppsatt navn)\n' "$(link "$dns_url")" >&2
-      printf '  HTTPS: %s  (uten port — krever reverse proxy, f.eks. Zoraxy, på 443)\n' "$(link "$https_url")" >&2
+      if [ -z "$port" ]; then
+        printf '  Ingen web-UI — kjører i bakgrunnen (network_mode: host)\n' >&2
+      else
+        ip_url="http://$ip:$port"
+        dns_navn="$LOKASJON-$NODE-$VMID-$app.$DOMENE"
+        [ -f "$APPS_DIR/$app/.dns_navn" ] && dns_navn=$(cat "$APPS_DIR/$app/.dns_navn")
+        dns_url="http://$dns_navn:$port"
+        https_url="https://$dns_navn"
+        printf '  IP:    %s\n' "$(link "$ip_url")" >&2
+        printf '  DNS:   %s  (krever oppsatt navn)\n' "$(link "$dns_url")" >&2
+        printf '  HTTPS: %s  (uten port — krever reverse proxy, f.eks. Zoraxy, på 443)\n' "$(link "$https_url")" >&2
+      fi
     fi
   done
   printf '\n' >&2
