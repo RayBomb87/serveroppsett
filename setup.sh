@@ -556,6 +556,14 @@ step_ssh_key() {
   chmod 600 "$keyfile" || die "chmod av authorized_keys feilet."
 }
 
+port_ledig() { # port_ledig <port> -> exit 0 hvis ingen TCP-tjeneste lytter på porten
+  if command -v ss >/dev/null 2>&1; then
+    ! ss -Htln "sport = :$1" 2>/dev/null | grep -q .
+  else
+    ! (exec 3<>"/dev/tcp/127.0.0.1/$1") 2>/dev/null
+  fi
+}
+
 step_ssh_hardening() {
   sep
   msg "SSH-herding"
@@ -574,7 +582,27 @@ step_ssh_hardening() {
       printf 'Include /etc/ssh/sshd_config.d/*.conf\n' | cat - /etc/ssh/sshd_config > "$tmp"
       mv "$tmp" /etc/ssh/sshd_config
     fi
-    printf 'PermitRootLogin no\nPasswordAuthentication no\n' > "$f"
+    local portlinje=""
+    printf '\n' >&2
+    if ask_yesno "Vil du endre SSH-porten fra standard 22?"; then
+      printf '\n' >&2
+      local nyport
+      nyport=$(ask_valid "Ny SSH-port (1-65535)" '^[0-9]{1,5}$' "må være et tall")
+      if [ "$nyport" -lt 1 ] || [ "$nyport" -gt 65535 ]; then
+        msg "$nyport er utenfor gyldig portområde (1–65535) — beholder standard SSH-port 22."
+      elif [ "$nyport" -eq 22 ]; then
+        msg "22 er standard — beholder standardporten."
+      elif port_ledig "$nyport"; then
+        portlinje="Port $nyport"
+        ok "Port $nyport er ledig — bytter SSH til denne porten."
+      else
+        msg "ADVARSEL: port $nyport er allerede i bruk av noe annet på denne serveren — beholder standard SSH-port 22."
+      fi
+    fi
+    {
+      printf 'PermitRootLogin no\nPasswordAuthentication no\n'
+      [ -n "$portlinje" ] && printf '%s\n' "$portlinje"
+    } > "$f"
     if ! sshd -t; then
       rm -f "$f"
       [ -n "$backup" ] && mv "$backup" /etc/ssh/sshd_config
@@ -584,6 +612,7 @@ step_ssh_hardening() {
     if systemctl enable --now ssh 2>/dev/null || systemctl enable --now sshd 2>/dev/null; then
       if systemctl restart ssh 2>/dev/null || systemctl restart sshd 2>/dev/null; then
         ok "Root-SSH og passordinnlogging er stengt (kun nøkkel nå)"
+        [ -n "$portlinje" ] && msg "SSH lytter nå på port $nyport i stedet for 22 — husk å åpne denne porten i evt. brannmur/sikkerhetsgruppe før du logger ut."
       else
         msg "ADVARSEL: fikk ikke startet sshd på nytt automatisk — kjør 'systemctl restart sshd' manuelt; herdingen gjelder først etter restart."
       fi
@@ -591,7 +620,11 @@ step_ssh_hardening() {
       msg "ADVARSEL: fikk ikke aktivert/startet SSH-tjenesten automatisk — kjør 'systemctl enable --now sshd' manuelt; herdingen gjelder først da."
     fi
   fi
-  msg "VIKTIG: test i et NYTT vindu at 'ssh $ADMIN_USER@<ip>' virker før du logger ut!"
+  SSH_PORT=$(grep -oE '^Port [0-9]+' "$f" 2>/dev/null | awk '{print $2}') || true
+  SSH_PORT=${SSH_PORT:-22}
+  local sshkomm="ssh $ADMIN_USER@<ip>"
+  [ "$SSH_PORT" != "22" ] && sshkomm="ssh -p $SSH_PORT $ADMIN_USER@<ip>"
+  msg "VIKTIG: test i et NYTT vindu at '$sshkomm' virker før du logger ut!"
 }
 
 step_identity() {
@@ -856,6 +889,10 @@ main() {
   . "$CONF"
   step_apps
   print_app_logins
-  ok "Ferdig! Logg inn som $ADMIN_USER med SSH-nøkkel."
+  if [ "${SSH_PORT:-22}" != "22" ]; then
+    ok "Ferdig! Logg inn som $ADMIN_USER med SSH-nøkkel: ssh -p $SSH_PORT $ADMIN_USER@<ip>  (SSH-port: $SSH_PORT)"
+  else
+    ok "Ferdig! Logg inn som $ADMIN_USER med SSH-nøkkel på standardport 22."
+  fi
 }
 main "$@"
