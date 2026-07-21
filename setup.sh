@@ -586,6 +586,53 @@ port_ledig() { # port_ledig <port> -> exit 0 hvis ingen TCP-tjeneste lytter på 
   fi
 }
 
+sporsmal_ny_ssh_port() { # sporsmal_ny_ssh_port <naavaerende_port> — setter globalene SSH_PORT_ENDRET (0/1) og SSH_NY_PORTLINJE ("" = 22).
+  # NB: kalles direkte (IKKE via $(...)) — command substitution kjører i en
+  # subshell der globale tildelinger ikke slipper ut til den kallende koden.
+  local naa=$1 nyport
+  SSH_PORT_ENDRET=0
+  SSH_NY_PORTLINJE=""
+  printf '\n' >&2
+  ask_yesno "Vil du endre SSH-porten fra nåværende $naa?" || return 0
+  printf '\n' >&2
+  nyport=$(ask_valid "Ny SSH-port (1-65535)" '^[0-9]{1,5}$' "må være et tall")
+  if [ "$nyport" -lt 1 ] || [ "$nyport" -gt 65535 ]; then
+    msg "$nyport er utenfor gyldig portområde (1–65535) — ingen endring, beholder $naa."
+    return 0
+  fi
+  if [ "$nyport" -eq "$naa" ]; then
+    msg "$nyport er alt gjeldende port — ingen endring."
+    return 0
+  fi
+  if ! port_ledig "$nyport"; then
+    msg "ADVARSEL: port $nyport er allerede i bruk av noe annet på denne serveren — ingen endring, beholder $naa."
+    return 0
+  fi
+  ok "Port $nyport er ledig — bytter SSH til denne porten."
+  SSH_PORT_ENDRET=1
+  [ "$nyport" -ne 22 ] && SSH_NY_PORTLINJE="Port $nyport"
+  return 0
+}
+
+skriv_ssh_herding_fil() { # skriv_ssh_herding_fil <portlinje> <f> — skriver, validerer, restarter sshd; ruller tilbake ved valideringsfeil
+  local portlinje=$1 f=$2 forrige=""
+  [ -f "$f" ] && forrige=$(cat "$f")
+  {
+    printf 'PermitRootLogin no\nPasswordAuthentication no\n'
+    [ -n "$portlinje" ] && printf '%s\n' "$portlinje"
+  } > "$f"
+  if ! sshd -t; then
+    if [ -n "$forrige" ]; then printf '%s\n' "$forrige" > "$f"; else rm -f "$f"; fi
+    die "sshd-konfig feilet validering — endringen er rullet tilbake."
+  fi
+  if systemctl restart ssh 2>/dev/null || systemctl restart sshd 2>/dev/null; then
+    ok "sshd restartet — ${portlinje:-standard SSH-port 22} er nå aktiv"
+    msg "VIKTIG: test i et NYTT vindu at innlogging på den nye porten virker FØR du logger ut av denne økten!"
+  else
+    msg "ADVARSEL: fikk ikke restartet sshd automatisk — kjør 'systemctl restart sshd' manuelt for at portendringen skal tre i kraft."
+  fi
+}
+
 step_ssh_hardening() {
   sep
   msg "SSH-herding"
@@ -594,6 +641,10 @@ step_ssh_hardening() {
   local f=/etc/ssh/sshd_config.d/00-serveroppsett.conf
   if [ -f "$f" ]; then
     skip "Herding er alt konfigurert ($f)"
+    local naa; naa=$(grep -oE '^Port [0-9]+' "$f" 2>/dev/null | awk '{print $2}') || true
+    naa=${naa:-22}
+    sporsmal_ny_ssh_port "$naa"
+    [ "$SSH_PORT_ENDRET" -eq 1 ] && skriv_ssh_herding_fil "$SSH_NY_PORTLINJE" "$f"
   else
     install -d -m 755 /etc/ssh/sshd_config.d
     local backup=""
@@ -604,23 +655,9 @@ step_ssh_hardening() {
       printf 'Include /etc/ssh/sshd_config.d/*.conf\n' | cat - /etc/ssh/sshd_config > "$tmp"
       mv "$tmp" /etc/ssh/sshd_config
     fi
-    local portlinje=""
-    printf '\n' >&2
-    if ask_yesno "Vil du endre SSH-porten fra standard 22?"; then
-      printf '\n' >&2
-      local nyport
-      nyport=$(ask_valid "Ny SSH-port (1-65535)" '^[0-9]{1,5}$' "må være et tall")
-      if [ "$nyport" -lt 1 ] || [ "$nyport" -gt 65535 ]; then
-        msg "$nyport er utenfor gyldig portområde (1–65535) — beholder standard SSH-port 22."
-      elif [ "$nyport" -eq 22 ]; then
-        msg "22 er standard — beholder standardporten."
-      elif port_ledig "$nyport"; then
-        portlinje="Port $nyport"
-        ok "Port $nyport er ledig — bytter SSH til denne porten."
-      else
-        msg "ADVARSEL: port $nyport er allerede i bruk av noe annet på denne serveren — beholder standard SSH-port 22."
-      fi
-    fi
+    sporsmal_ny_ssh_port 22
+    local portlinje=$SSH_NY_PORTLINJE
+    local nyport=""; [ -n "$portlinje" ] && nyport=${portlinje#Port }
     {
       printf 'PermitRootLogin no\nPasswordAuthentication no\n'
       [ -n "$portlinje" ] && printf '%s\n' "$portlinje"
