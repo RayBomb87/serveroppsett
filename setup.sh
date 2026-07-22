@@ -69,6 +69,27 @@ Kjøre denne kommandoen nå?"
   ask_yesno "Kjøre denne kommandoen nå?"
 }
 
+vis_ai_tekst() { # vis_ai_tekst <overskrift> <innhold> -> ingen returverdi, viser og venter på at brukeren trykker OK
+  # innhold brytes med fold FØR whiptail, siden whiptails egen tekstbryting
+  # for lange, uforutsigbare AI-genererte avsnitt har vist seg upålitelig
+  # (samme problem som forklaringsteksten i ai_modell_valg tidligere).
+  local heading=$1 innhold=$2
+  if whiptail_klar; then
+    local innhold_brutt full hoyde linjer
+    innhold_brutt=$(printf '%s' "$innhold" | fold -s -w 96)
+    full="$heading
+
+$innhold_brutt"
+    linjer=$(printf '%s\n' "$full" | wc -l)
+    hoyde=$((linjer + 6))
+    [ "$hoyde" -gt 34 ] && hoyde=34
+    whiptail --title "AI-svar" --ok-button "OK" --msgbox "$full" "$hoyde" 104 3>&1 1>&2 2>&3 < "$TTY"
+    return
+  fi
+  msg "$heading"
+  printf '\n%s\n\n' "$innhold" >&2
+}
+
 whiptail_bredde() { # whiptail_bredde <linje/flerlinjestreng> ... -> bredde på stdout (lengste linje + margin, med gulv på 40)
   local bredde=40 arg sub
   for arg in "$@"; do
@@ -794,8 +815,7 @@ ai_samtale_loop() { # ai_samtale_loop <leverandor> <modell> <nokkel> <rapport> -
       printf '%s' "$tekst"; return
     fi
 
-    msg "AI-en spør (runde $runde/12):"
-    printf '\n%s\n\n' "$tekst" >&2
+    vis_ai_tekst "AI-en spør (runde $runde/12):" "$prosa"
 
     local kommando_resultat="" ut
     for blokk in "${blokker[@]}"; do
@@ -824,9 +844,7 @@ $ut
     if [ -n "$kommando_resultat" ]; then
       local tillegg
       if [ -n "${prosa//[[:space:]]/}" ]; then
-        sep
-        msg "Spørsmålet AI-en stilte (gjentatt, så du slipper å skrolle opp forbi kommando-output):"
-        printf '\n%s\n' "$prosa" >&2
+        vis_ai_tekst "Spørsmålet AI-en stilte (gjentatt, så du slipper å skrolle opp forbi kommando-output):" "$prosa"
       fi
       read -rp "Stilte AI-en et spørsmål i teksten over? Skriv svaret ditt her (Enter for å gå videre uten): " tillegg < "$TTY"
       svar_bruker="Resultat av kommandoene AI-en ba om:${kommando_resultat}"
