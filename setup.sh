@@ -537,7 +537,7 @@ ai_kall() { # ai_kall <leverandor> <api_nokkel> <system> <meldinger_json> -> ass
   case "$leverandor" in
     anthropic)
       body=$(jq -n --arg sys "$system" --argjson msgs "$meldinger" \
-        '{model:"claude-sonnet-5", max_tokens:1024, thinking:{type:"disabled"}, system:$sys, messages:$msgs}')
+        '{model:"claude-sonnet-5", max_tokens:4096, thinking:{type:"disabled"}, system:$sys, messages:$msgs}')
       respons=$(curl -sSL -w '\n%{http_code}' https://api.anthropic.com/v1/messages \
         -H "content-type: application/json" \
         -H "x-api-key: $nokkel" \
@@ -546,7 +546,7 @@ ai_kall() { # ai_kall <leverandor> <api_nokkel> <system> <meldinger_json> -> ass
       ;;
     openai)
       body=$(jq -n --arg sys "$system" --argjson msgs "$meldinger" \
-        '{model:"gpt-4o", messages: ([{role:"system", content:$sys}] + $msgs)}')
+        '{model:"gpt-4o", max_tokens:4096, messages: ([{role:"system", content:$sys}] + $msgs)}')
       respons=$(curl -sSL -w '\n%{http_code}' https://api.openai.com/v1/chat/completions \
         -H "content-type: application/json" \
         -H "Authorization: Bearer $nokkel" \
@@ -561,14 +561,27 @@ ai_kall() { # ai_kall <leverandor> <api_nokkel> <system> <meldinger_json> -> ass
     429) msg "AI-kall feilet: 429 — for mange forespørsler eller tomt kredittsaldo hos $leverandor."; return 1 ;;
     *) msg "AI-kall feilet: HTTP $http_kode fra $leverandor."; printf '%s\n' "$svar" >&2; return 1 ;;
   esac
+  local stopp_arsak=""
   case "$leverandor" in
-    anthropic) tekst=$(printf '%s' "$svar" | jq -r '[.content[]? | select(.type=="text") | .text] | join("\n")') ;;
-    openai)    tekst=$(printf '%s' "$svar" | jq -r '.choices[0].message.content // empty') ;;
+    anthropic)
+      tekst=$(printf '%s' "$svar" | jq -r '[.content[]? | select(.type=="text") | .text] | join("\n")')
+      stopp_arsak=$(printf '%s' "$svar" | jq -r '.stop_reason // empty')
+      ;;
+    openai)
+      tekst=$(printf '%s' "$svar" | jq -r '.choices[0].message.content // empty')
+      stopp_arsak=$(printf '%s' "$svar" | jq -r '.choices[0].finish_reason // empty')
+      ;;
   esac
   if [ -z "$tekst" ]; then
     msg "Tomt eller uventet svar fra AI-tjenesten:"
     printf '%s\n' "$svar" >&2
     return 1
+  fi
+  if [ "$stopp_arsak" = "max_tokens" ] || [ "$stopp_arsak" = "length" ]; then
+    msg "OBS: AI-svaret ble kuttet av fordi det nådde maks lengde — det er trolig ufullstendig (avsluttes midt i en setning)."
+    tekst="$tekst
+
+[MERK TIL AI-EN: svaret ditt over ble kuttet av pga. lengdegrense og er ufullstendig — fortsett der du slapp, eller oppsummer kort på nytt.]"
   fi
   printf '%s' "$tekst"
 }
