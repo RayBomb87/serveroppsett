@@ -7,37 +7,38 @@ ADMIN_CONF=/etc/serveroppsett-admin.conf
 APPS_CONF=/etc/serveroppsett-apps.conf
 TTY=/dev/tty
 
-# Ved "curl | bash" er skriptets egen fd 0 selve curl-pipen (bash leser
-# RESTEN AV SKRIPTET derfra etter hvert som det kjører) - IKKE terminalen.
-# Live-funn 22. juli 2026 på to Proxmox-verter: skriptets aller første
-# whiptail-dialog (pve_menu) tegnet boksen, men piltaster ble ekko-et rått
-# i stedet for å styre den (sudo sin egen use_pty, bekreftet aktiv i
-# sudoers, ser ut til å skape et race her). Et forsøk på å fikse dette med
-# "exec < /dev/tty" midt i skriptet var GALT og verre: det bytter ut fd 0,
-# som bash SELV leser resten av skriptkoden fra - skriptet fryser da og
-# venter på at resten av skriptet skal skrives inn fra tastaturet.
-# Nedlastet fil + "bash fil.sh" (stdin allerede ekte terminal, og bash leser
-# skriptet fra en fil, ikke fd 0) hadde ALDRI problemet - så løsningen er å
-# gjøre nøyaktig det samme automatisk: hvis stdin ikke er en terminal OG $0
-# ikke er en ekte fil (dvs. vi er bevist pipe-kjørt, ikke en lokal
-# fil-kjøring/test), last skriptet ned til en midlertidig fil og kjør det
-# på nytt derfra, med stdin koblet til den ekte terminalen.
-if [ ! -t 0 ] && [ ! -f "$0" ]; then
-  RAW_URL=https://raw.githubusercontent.com/RayBomb87/serveroppsett/main/setup.sh
-  TMPSCRIPT=$(mktemp /tmp/serveroppsett-XXXXXX.sh)
-  if command -v curl >/dev/null; then
-    curl -fsSL "$RAW_URL" -o "$TMPSCRIPT"
-  elif command -v wget >/dev/null; then
-    wget -qO "$TMPSCRIPT" "$RAW_URL"
-  else
-    echo "FEIL: fant verken curl eller wget - kan ikke laste ned skriptet på nytt som fil (nødvendig for interaktive dialoger via curl|bash)." >&2
-    exit 1
-  fi
-  chmod +x "$TMPSCRIPT"
-  status=0
-  bash "$TMPSCRIPT" "$@" < /dev/tty || status=$?
-  rm -f "$TMPSCRIPT"
-  exit "$status"
+# "curl | sudo bash" + sudo sin "Defaults use_pty" (aktiv i sudoers, og
+# standard siden sudo 1.9.14) er en ukjørbar kombinasjon for interaktive
+# whiptail-dialoger. Rotårsak, funnet 22. juli 2026 etter mange live-runder
+# på to Proxmox-verter: use_pty gir sudo sin egen pseudo-terminal for
+# UTDATA (derfor tegnes whiptail-boksen helt korrekt), men sudo videresender
+# tastetrykk KUN fra sin EGEN stdin - som i "curl | sudo bash" er selve
+# curl-pipen (skriptteksten), ikke tastaturet. Den nye pty-en får dermed
+# aldri noen ekte tastetrykk, uansett hva skriptet selv gjør (bekreftet:
+# verken "exec < /dev/tty" eller å laste ned skriptet på nytt til en fil og
+# kjøre det derfra INNENFRA denne prosessen hjalp - pty-en er allerede
+# "foreldreløs" på inputsiden før skriptet i det hele tatt starter).
+# Eneste robuste løsning er å ikke sende skriptet inn på sudo sin stdin i
+# utgangspunktet - da beholder sudo den ekte terminalen som sin stdin, og
+# use_pty videresender tastetrykk normalt. Oppdager vi denne kombinasjonen,
+# forklarer vi det og stopper i stedet for å late som et fiks er mulig.
+if [ ! -t 0 ] && { [ -n "${SUDO_USER:-}" ] || [ -n "${SUDO_UID:-}" ]; }; then
+  cat >&2 <<'EOF'
+FEIL: skriptet ble startet som «curl ... | sudo bash».
+I den formen mister sudo sin egen use_pty muligheten til å videresende
+tastetrykk til whiptail-menyene (piltaster ekkoes rått i stedet for å
+styre dem) - dette kan ikke fikses fra innsiden av skriptet.
+
+Kjør i stedet, ORDRETT (sudo beholder da terminalen som sin stdin):
+
+    sudo bash -c "$(curl -fsSL https://raw.githubusercontent.com/RayBomb87/serveroppsett/main/setup.sh)"
+
+Er du allerede root (f.eks. etter "su -"), fungerer den vanlige
+pipe-formen helt fint uten sudo:
+
+    curl -fsSL https://raw.githubusercontent.com/RayBomb87/serveroppsett/main/setup.sh | bash
+EOF
+  exit 1
 fi
 
 # Unngå apt-listchanges/perl sine harmløse "Cannot set locale"-varsler på
