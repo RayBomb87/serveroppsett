@@ -7,21 +7,38 @@ ADMIN_CONF=/etc/serveroppsett-admin.conf
 APPS_CONF=/etc/serveroppsett-apps.conf
 TTY=/dev/tty
 
-# Ved "curl | bash" er skriptets egen stdin (fd 0) selve curl-pipen, ikke
-# terminalen. Hvert whiptail/read-kall kobler eksplisitt om til $TTY, men et
-# race ved skriptets ALLER FØRSTE whiptail-dialog (pve_menu) ble observert
-# live 22. juli 2026 på to forskjellige Proxmox-verter, begge kjørt via
-# "curl | sudo bash" med sudo sin egen use_pty (bekreftet aktiv i sudoers):
-# boksen tegnet seg, men piltaster ble ekko-et rått i stedet for å styre
-# whiptail. Nedlastet fil + "bash fil.sh" (stdin allerede ekte terminal fra
-# start) hadde ALDRI problemet - fikset her ved å koble om skriptets egen
-# stdin til terminalen permanent, så snart som mulig, i stedet for å
-# stole på per-kall-redirects alene.
-echo "DEBUG: stdin FØR exec-fiks: $([ -t 0 ] && echo 'ER en terminal' || echo 'ER IKKE en terminal')" >&2
-if [ ! -t 0 ] && [ -r "$TTY" ]; then
-  exec < "$TTY"
+# Ved "curl | bash" er skriptets egen fd 0 selve curl-pipen (bash leser
+# RESTEN AV SKRIPTET derfra etter hvert som det kjører) - IKKE terminalen.
+# Live-funn 22. juli 2026 på to Proxmox-verter: skriptets aller første
+# whiptail-dialog (pve_menu) tegnet boksen, men piltaster ble ekko-et rått
+# i stedet for å styre den (sudo sin egen use_pty, bekreftet aktiv i
+# sudoers, ser ut til å skape et race her). Et forsøk på å fikse dette med
+# "exec < /dev/tty" midt i skriptet var GALT og verre: det bytter ut fd 0,
+# som bash SELV leser resten av skriptkoden fra - skriptet fryser da og
+# venter på at resten av skriptet skal skrives inn fra tastaturet.
+# Nedlastet fil + "bash fil.sh" (stdin allerede ekte terminal, og bash leser
+# skriptet fra en fil, ikke fd 0) hadde ALDRI problemet - så løsningen er å
+# gjøre nøyaktig det samme automatisk: hvis stdin ikke er en terminal OG $0
+# ikke er en ekte fil (dvs. vi er bevist pipe-kjørt, ikke en lokal
+# fil-kjøring/test), last skriptet ned til en midlertidig fil og kjør det
+# på nytt derfra, med stdin koblet til den ekte terminalen.
+if [ ! -t 0 ] && [ ! -f "$0" ]; then
+  RAW_URL=https://raw.githubusercontent.com/RayBomb87/serveroppsett/main/setup.sh
+  TMPSCRIPT=$(mktemp /tmp/serveroppsett-XXXXXX.sh)
+  if command -v curl >/dev/null; then
+    curl -fsSL "$RAW_URL" -o "$TMPSCRIPT"
+  elif command -v wget >/dev/null; then
+    wget -qO "$TMPSCRIPT" "$RAW_URL"
+  else
+    echo "FEIL: fant verken curl eller wget - kan ikke laste ned skriptet på nytt som fil (nødvendig for interaktive dialoger via curl|bash)." >&2
+    exit 1
+  fi
+  chmod +x "$TMPSCRIPT"
+  status=0
+  bash "$TMPSCRIPT" "$@" < /dev/tty || status=$?
+  rm -f "$TMPSCRIPT"
+  exit "$status"
 fi
-echo "DEBUG: stdin ETTER exec-fiks: $([ -t 0 ] && echo 'ER en terminal' || echo 'ER IKKE en terminal')" >&2
 
 # Unngå apt-listchanges/perl sine harmløse "Cannot set locale"-varsler på
 # ferske maler uten genererte locales. C.UTF-8 er alltid tilgjengelig uten
