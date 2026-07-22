@@ -555,6 +555,17 @@ finn_kildekodenavn() { # finn_kildekodenavn <fra> <til> -> "gammelt nytt" på st
 }
 
 ai_leverandor_valg() { # -> "anthropic" | "openai" | "" (ingen) på stdout
+  if whiptail_klar; then
+    local tag
+    while true; do
+      tag=$(whiptail --title "AI-assistert risikovurdering" \
+        --menu "Vil du ha AI-assistert risikovurdering av oppgraderingsrapporten?" 15 70 3 \
+        anthropic "Anthropic Claude" \
+        openai    "OpenAI" \
+        ingen     "Nei — vis kun rå rapport" \
+        3>&1 1>&2 2>&3 < "$TTY") && { [ "$tag" = ingen ] && printf '' || printf '%s' "$tag"; return; }
+    done
+  fi
   local svar
   while true; do
     printf '  1) Anthropic Claude\n' >&2
@@ -565,6 +576,51 @@ ai_leverandor_valg() { # -> "anthropic" | "openai" | "" (ingen) på stdout
       1) printf 'anthropic'; return ;;
       2) printf 'openai'; return ;;
       3) printf ''; return ;;
+      *) msg "Ugyldig valg: «$svar» — skriv 1, 2 eller 3." ;;
+    esac
+  done
+}
+
+ai_modell_valg() { # ai_modell_valg <leverandor> -> modell-ID på stdout, eller "TILBAKE"
+  local leverandor=$1 god_id god_navn god_inn god_ut beste_id beste_navn beste_inn beste_ut
+  case "$leverandor" in
+    anthropic)
+      god_id=claude-haiku-4-5;  god_navn="Claude Haiku 4.5";  god_inn=1.00;  god_ut=5.00
+      beste_id=claude-sonnet-5; beste_navn="Claude Sonnet 5"; beste_inn=3.00; beste_ut=15.00
+      ;;
+    openai)
+      god_id=gpt-4o-mini;  god_navn="GPT-4o-mini";  god_inn=0.15;  god_ut=0.60
+      beste_id=gpt-4o;     beste_navn="GPT-4o";     beste_inn=2.50; beste_ut=10.00
+      ;;
+  esac
+  local forklaring="Pris per 1 million tokens (inn/ut). Faktisk kostnad avhenger av rapportstørrelse og antall samtalerunder (opptil 12) — typisk et lite antall øre til noen få kroner for en full vurdering. Prisene er et øyeblikksbilde og kan avvike fra leverandørens gjeldende priser."
+  if whiptail_klar; then
+    local tag
+    while true; do
+      tag=$(whiptail --title "Velg AI-modell" --menu "$forklaring" 18 78 3 \
+        god     "$god_navn — \$$god_inn / \$$god_ut per 1M" \
+        beste   "$beste_navn — \$$beste_inn / \$$beste_ut per 1M" \
+        tilbake "Bytt AI-tjeneste" \
+        3>&1 1>&2 2>&3 < "$TTY") && break
+    done
+    case "$tag" in
+      god) printf '%s' "$god_id" ;;
+      beste) printf '%s' "$beste_id" ;;
+      tilbake) printf 'TILBAKE' ;;
+    esac
+    return
+  fi
+  msg "$forklaring"
+  local svar
+  while true; do
+    printf '  1) %s — $%s / $%s per 1M\n' "$god_navn" "$god_inn" "$god_ut" >&2
+    printf '  2) %s — $%s / $%s per 1M\n' "$beste_navn" "$beste_inn" "$beste_ut" >&2
+    printf '  3) Bytt AI-tjeneste\n' >&2
+    read -rp "Velg modell [1/2/3]: " svar < "$TTY"
+    case "$svar" in
+      1) printf '%s' "$god_id"; return ;;
+      2) printf '%s' "$beste_id"; return ;;
+      3) printf 'TILBAKE'; return ;;
       *) msg "Ugyldig valg: «$svar» — skriv 1, 2 eller 3." ;;
     esac
   done
