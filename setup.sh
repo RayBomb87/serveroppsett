@@ -23,8 +23,35 @@ link() { # link "URL" -> klikkbar lenke på stdout (viser rå URL i terminaler u
   printf '\033]8;;%s\033\\%s\033]8;;\033\\' "$1" "$1"
 }
 
+WHIPTAIL_OK=""  # "" = ikke sjekket ennå, "1" = tilgjengelig, "0" = ikke tilgjengelig (gjelder resten av kjøringen)
+
+whiptail_klar() { # -> exit 0 hvis whiptail kan brukes, ellers 1 (sjekker/installerer kun én gang per kjøring)
+  case "$WHIPTAIL_OK" in
+    1) return 0 ;;
+    0) return 1 ;;
+  esac
+  if command -v whiptail >/dev/null; then WHIPTAIL_OK=1; return 0; fi
+  msg "whiptail mangler — installerer for et penere grensesnitt ..."
+  pkg_install whiptail >/dev/null 2>&1 || true
+  if command -v whiptail >/dev/null; then WHIPTAIL_OK=1; return 0; fi
+  msg "Fikk ikke installert whiptail — fortsetter med tekstbaserte spørsmål."
+  WHIPTAIL_OK=0
+  return 1
+}
+
 ask() { # ask "Spørsmål" [default] -> svar på stdout
   local q=$1 def=${2:-} svar
+  if whiptail_klar; then
+    if [ -n "$def" ]; then
+      svar=$(whiptail --title "Input" --inputbox "$q" 10 70 "$def" 3>&1 1>&2 2>&3 < "$TTY") || svar=$def
+      printf '%s' "${svar:-$def}"
+      return
+    fi
+    while true; do
+      svar=$(whiptail --title "Input" --inputbox "$q" 10 70 3>&1 1>&2 2>&3 < "$TTY") || continue
+      [ -n "$svar" ] && { printf '%s' "$svar"; return; }
+    done
+  fi
   if [ -n "$def" ]; then
     read -rp "$q [$def]: " svar < "$TTY"; printf '%s' "${svar:-$def}"
   else
@@ -36,7 +63,11 @@ ask() { # ask "Spørsmål" [default] -> svar på stdout
   fi
 }
 
-ask_yesno() { # ask_yesno "Spørsmål" -> exit 0=ja 1=nei (spør på nytt til gyldig j/n)
+ask_yesno() { # ask_yesno "Spørsmål" -> exit 0=ja 1=nei (whiptail hvis tilgjengelig, ellers tekst-fallback; spør på nytt til gyldig j/n i tekst-sporet)
+  if whiptail_klar; then
+    whiptail --title "Bekreft" --yesno "$1" 10 70 3>&1 1>&2 2>&3 < "$TTY"
+    return $?
+  fi
   local svar
   while true; do
     read -rp "$1 [j/n]: " svar < "$TTY"
@@ -59,7 +90,14 @@ ask_valid() { # ask_valid "Spørsmål" "regex" "feilhint" [default] -> svar (sp�
 
 ask_secret() { # ask_secret "Spørsmål" -> svar på stdout, uten ekko, aldri skrevet til disk
   local svar lengde halvt
-  read -rsp "$1: " svar < "$TTY"; printf '\n' >&2
+  if whiptail_klar; then
+    while true; do
+      svar=$(whiptail --title "Skjult input" --passwordbox "$1" 10 70 3>&1 1>&2 2>&3 < "$TTY") && break
+      msg "Avbrutt — prøv igjen (eller Ctrl+C for å avslutte skriptet)."
+    done
+  else
+    read -rsp "$1: " svar < "$TTY"; printf '\n' >&2
+  fi
   lengde=${#svar}
   if [ "$lengde" -eq 0 ]; then
     msg "Fikk ingen input (tom verdi)."
