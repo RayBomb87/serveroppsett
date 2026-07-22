@@ -52,8 +52,18 @@ ask_valid() { # ask_valid "Spørsmål" "regex" "feilhint" [default] -> svar (sp�
 }
 
 ask_secret() { # ask_secret "Spørsmål" -> svar på stdout, uten ekko, aldri skrevet til disk
-  local svar
+  local svar lengde halvt
   read -rsp "$1: " svar < "$TTY"; printf '\n' >&2
+  lengde=${#svar}
+  if [ "$lengde" -eq 0 ]; then
+    msg "Fikk ingen input (tom verdi)."
+  else
+    halvt=$((lengde/2))
+    if [ $((lengde % 2)) -eq 0 ] && [ "${svar:0:halvt}" = "${svar:halvt}" ]; then
+      msg "OBS: det du limte inn ligner to like halvdeler etter hverandre ($lengde tegn totalt) — vanlig tegn på at limingen skjedde to ganger. Sjekk om nøkkelen er dobbel."
+    fi
+    msg "Mottok $lengde tegn (starter «${svar:0:4}…», slutter «…${svar: -4}»)."
+  fi
   printf '%s' "$svar"
 }
 
@@ -517,27 +527,37 @@ ai_leverandor_valg() { # -> "anthropic" | "openai" | "" (ingen) på stdout
 }
 
 ai_kall() { # ai_kall <leverandor> <api_nokkel> <system> <meldinger_json> -> assistentens tekst på stdout
-  local leverandor=$1 nokkel=$2 system=$3 meldinger=$4 body svar tekst
+  local leverandor=$1 nokkel=$2 system=$3 meldinger=$4 body respons http_kode svar tekst
   case "$leverandor" in
     anthropic)
       body=$(jq -n --arg sys "$system" --argjson msgs "$meldinger" \
         '{model:"claude-sonnet-5", max_tokens:1024, thinking:{type:"disabled"}, system:$sys, messages:$msgs}')
-      svar=$(curl -fsSL https://api.anthropic.com/v1/messages \
+      respons=$(curl -sSL -w '\n%{http_code}' https://api.anthropic.com/v1/messages \
         -H "content-type: application/json" \
         -H "x-api-key: $nokkel" \
         -H "anthropic-version: 2023-06-01" \
-        -d "$body") || { msg "AI-kall feilet (nettverk eller Anthropic-API utilgjengelig)."; return 1; }
-      tekst=$(printf '%s' "$svar" | jq -r '[.content[]? | select(.type=="text") | .text] | join("\n")')
+        -d "$body") || { msg "AI-kall feilet (nettverksfeil mot Anthropic — sjekk internettforbindelsen)."; return 1; }
       ;;
     openai)
       body=$(jq -n --arg sys "$system" --argjson msgs "$meldinger" \
         '{model:"gpt-4o", messages: ([{role:"system", content:$sys}] + $msgs)}')
-      svar=$(curl -fsSL https://api.openai.com/v1/chat/completions \
+      respons=$(curl -sSL -w '\n%{http_code}' https://api.openai.com/v1/chat/completions \
         -H "content-type: application/json" \
         -H "Authorization: Bearer $nokkel" \
-        -d "$body") || { msg "AI-kall feilet (nettverk eller OpenAI-API utilgjengelig)."; return 1; }
-      tekst=$(printf '%s' "$svar" | jq -r '.choices[0].message.content // empty')
+        -d "$body") || { msg "AI-kall feilet (nettverksfeil mot OpenAI — sjekk internettforbindelsen)."; return 1; }
       ;;
+  esac
+  http_kode=$(printf '%s' "$respons" | tail -1)
+  svar=$(printf '%s' "$respons" | sed '$d')
+  case "$http_kode" in
+    200) ;;
+    401) msg "AI-kall feilet: 401 Unauthorized — $leverandor avviste API-nøkkelen. Sjekk at den er riktig (og ikke limt inn dobbelt)."; return 1 ;;
+    429) msg "AI-kall feilet: 429 — for mange forespørsler eller tomt kredittsaldo hos $leverandor."; return 1 ;;
+    *) msg "AI-kall feilet: HTTP $http_kode fra $leverandor."; printf '%s\n' "$svar" >&2; return 1 ;;
+  esac
+  case "$leverandor" in
+    anthropic) tekst=$(printf '%s' "$svar" | jq -r '[.content[]? | select(.type=="text") | .text] | join("\n")') ;;
+    openai)    tekst=$(printf '%s' "$svar" | jq -r '.choices[0].message.content // empty') ;;
   esac
   if [ -z "$tekst" ]; then
     msg "Tomt eller uventet svar fra AI-tjenesten:"
@@ -639,10 +659,11 @@ handling_ve-oppgradering() {
 
   local anbefalt_policy="" konfigpolicy policy_svar
   if [ -n "$leverandor" ]; then
+    msg "Spør AI-en om anbefaling for config-fil-håndtering ..."
     anbefalt_policy=$(ai_konfigfil_policy "$leverandor" "$nokkel" "$rapport" | grep -oP "ANBEFALING:\s*\Kconf(old|new)" | head -1) || true
   fi
   sep
-  msg "Config-fil-håndtering under oppgraderingen (gjelder som ÉN policy for hele kjøringen):"
+  msg "apt dist-upgrade kan støte på config-filer du har endret manuelt (f.eks. nettverksoppsett). Da må den vite på forhånd hvilken versjon den skal beholde — for ALLE slike filer under denne oppgraderingen:"
   msg "  confold = behold DINE tilpasninger av config-filer (tryggest for en produksjonshypervisor)"
   msg "  confnew = bruk vedlikeholders NYE versjon av config-filene"
   [ -n "$anbefalt_policy" ] && msg "AI-en anbefaler: $anbefalt_policy"
