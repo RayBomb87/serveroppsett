@@ -313,19 +313,105 @@ is_pve_host() { command -v pveversion >/dev/null; }
 # SYSTEM_KATALOG — handlinger på selve Proxmox-hosten, samme katalog-mønster
 # som APP_KATALOG. handling_<navn>() gjør jobben, handling_navn_<navn>()
 # returnerer visningsnavnet i menyen. Nye host-handlinger legges til her.
-SYSTEM_KATALOG="ve-oppgradering gpu-drivere"
+SYSTEM_KATALOG="ve-oppgradering gpu-drivere community-scripts"
 
-handling_navn_ve-oppgradering() { printf 'VE-oppgradering (med valgfri AI-vurdering)'; }
-handling_navn_gpu-drivere()     { printf 'GPU-drivere'; }
+handling_navn_ve-oppgradering()    { printf 'VE-oppgradering (med valgfri AI-vurdering)'; }
+handling_navn_gpu-drivere()        { printf 'GPU-drivere'; }
+handling_navn_community-scripts()  { printf 'Kjør community-script (community-scripts/ProxmoxVE)'; }
 
 handling_gpu-drivere() { skip "GPU-drivere er ikke bygget ennå — kommer i en senere oppdatering."; }
+
+# COMMUNITY_SCRIPT_KATALOG — eksterne community-scripts (community-scripts/ProxmoxVE)
+# som kan kjøres direkte på Proxmox-hosten. community_script_navn_<navn>() gir
+# visningsnavn, community_script_url_<navn>() gir rå script-URL-en. Nye
+# scripts legges til her etter samme mønster.
+COMMUNITY_SCRIPT_KATALOG="post-pve-install"
+
+community_script_navn_post-pve-install() { printf 'Post-install-oppsett (fjerner abonnements-nag, setter opp no-subscription-repo m.m.)'; }
+community_script_url_post-pve-install()  { printf 'https://raw.githubusercontent.com/community-scripts/ProxmoxVE/main/tools/pve/post-pve-install.sh'; }
+
+sporsmal_community_script() { # -> valgt katalog-navn på stdout, eller tom streng (avbrutt)
+  local -a navn=()
+  local n
+  for n in $COMMUNITY_SCRIPT_KATALOG; do navn+=("$n"); done
+  local antall=${#navn[@]}
+  if whiptail_klar; then
+    local -a menyrader=()
+    local i tag bredde
+    for i in "${!navn[@]}"; do
+      menyrader+=("$((i+1))" "$("community_script_navn_${navn[$i]}")")
+    done
+    bredde=$(whiptail_bredde "Velg community-script å kjøre:" "${menyrader[@]}")
+    [ "$bredde" -gt 100 ] && bredde=100
+    tag=$(whiptail --title "Community-scripts (community-scripts/ProxmoxVE)" --ok-button "OK" --cancel-button "Avbryt" \
+      --menu "Velg community-script å kjøre:" "$((antall+10))" "$bredde" "$antall" \
+      "${menyrader[@]}" \
+      3>&1 1>&2 2>&3 < "$TTY") || { printf ''; return; }
+    printf '%s' "${navn[$((tag-1))]}"
+    return
+  fi
+  local valg i avbryt_nr
+  avbryt_nr=$((antall+1))
+  while true; do
+    i=1
+    for n in "${navn[@]}"; do
+      printf '  %d) %s\n' "$i" "$("community_script_navn_$n")" >&2
+      i=$((i+1))
+    done
+    printf '  %d) Avbryt\n' "$avbryt_nr" >&2
+    read -rp "Valg [1-$avbryt_nr]: " valg < "$TTY"
+    if [[ "$valg" =~ ^[0-9]+$ ]] && [ "$valg" -ge 1 ] && [ "$valg" -le "$antall" ]; then
+      printf '%s' "${navn[$((valg-1))]}"; return
+    elif [ "$valg" = "$avbryt_nr" ]; then
+      printf ''; return
+    else
+      msg "Ugyldig valg: «$valg» — skriv et tall mellom 1 og $avbryt_nr."
+    fi
+  done
+}
+
+handling_community-scripts() {
+  sep
+  msg "Community-scripts (community-scripts/ProxmoxVE)"
+  local valgt navn url
+  valgt=$(sporsmal_community_script)
+  if [ -z "$valgt" ]; then
+    msg "Avbrutt — ingen endringer gjort."
+    return
+  fi
+  navn=$("community_script_navn_$valgt")
+  url=$("community_script_url_$valgt")
+  local advarsel="ADVARSEL: Dette er et tredjeparts-script fra community-scripts/ProxmoxVE - ikke skrevet, vedlikeholdt eller kvalitetssikret av dette skriptet. Kjøres på eget ansvar: verken dette skriptets forfatter eller noen tilknyttet det er ansvarlig for feil, datatap eller andre problemer scriptet måtte forårsake.
+
+Kjøre dette community-scriptet nå ($navn)?"
+  if bekreft_kommando "$advarsel" "bash -c \"\$(curl -fsSL $url)\""; then
+    bash -c "$(curl -fsSL "$url")"
+  else
+    msg "Avbrutt — scriptet ble ikke kjørt."
+  fi
+}
 
 systemmeny() { # bygger nummerert liste fra SYSTEM_KATALOG + Avbryt, dispatcher til handling_<navn>
   local -a navn=()
   local n
   for n in $SYSTEM_KATALOG; do navn+=("$n"); done
-  local antall avbryt_nr valg i
-  antall=${#navn[@]}
+  local antall=${#navn[@]}
+  if whiptail_klar; then
+    local -a menyrader=()
+    local i tag bredde
+    for i in "${!navn[@]}"; do
+      menyrader+=("$((i+1))" "$("handling_navn_${navn[$i]}")")
+    done
+    bredde=$(whiptail_bredde "Velg systemhandling:" "${menyrader[@]}")
+    [ "$bredde" -gt 100 ] && bredde=100
+    tag=$(whiptail --title "Systemendringer på hosten" --ok-button "OK" --cancel-button "Avbryt" \
+      --menu "Velg systemhandling:" "$((antall+10))" "$bredde" "$antall" \
+      "${menyrader[@]}" \
+      3>&1 1>&2 2>&3 < "$TTY") || { msg "Avbryter uten å gjøre endringer."; return; }
+    "handling_${navn[$((tag-1))]}"
+    return
+  fi
+  local avbryt_nr valg i
   avbryt_nr=$((antall+1))
   while true; do
     i=1
