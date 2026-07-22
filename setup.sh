@@ -436,9 +436,12 @@ pve_menu() {
   msg "Proxmox-vert oppdaget"
   msg "Denne serveren er selve Proxmox-hosten, ikke en gjest."
   if whiptail_klar; then
-    local tag
+    local tag sporsmal bredde
+    sporsmal="Denne serveren er selve Proxmox-hosten, ikke en gjest. Velg handling:"
+    bredde=$(whiptail_bredde "$sporsmal" "Systemendringer på hosten (VE-oppgradering, GPU-drivere, m.m.)" "Opprette og sette opp en ny CT" "Avbryt")
+    [ "$bredde" -gt 90 ] && bredde=90
     tag=$(whiptail --title "Proxmox-vert oppdaget" --ok-button "OK" --cancel-button "Avbryt" \
-      --menu "Denne serveren er selve Proxmox-hosten, ikke en gjest. Velg handling:" 15 90 3 \
+      --menu "$sporsmal" 15 "$bredde" 3 \
       1 "Systemendringer på hosten (VE-oppgradering, GPU-drivere, m.m.)" \
       2 "Opprette og sette opp en ny CT" \
       3 "Avbryt" \
