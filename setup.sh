@@ -606,6 +606,12 @@ handling_ve-oppgradering() {
     ensure_jq
     leverandor=$(ai_leverandor_valg)
     if [ -n "$leverandor" ]; then
+      local nokkel_url=""
+      case "$leverandor" in
+        anthropic) nokkel_url="https://console.anthropic.com/settings/keys" ;;
+        openai)    nokkel_url="https://platform.openai.com/api-keys" ;;
+      esac
+      msg "Lag/hent API-nøkkel her: $nokkel_url"
       nokkel=$(ask_secret "API-nøkkel for $leverandor (kun i minnet denne kjøringen, aldri lagret)")
       sep
       msg "Starter AI-samtale om oppgraderingen (maks 12 runder) ..."
