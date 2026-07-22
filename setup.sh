@@ -626,9 +626,10 @@ ai_samtale_loop() { # ai_samtale_loop <leverandor> <nokkel> <rapport> -> sluttvu
       msg "AI-en foreslår å kjøre dette på serveren (samme rettigheter som dette skriptet, vanligvis root — les nøye):"
       printf '\n%s\n\n' "$blokk" >&2
       if ask_yesno "Kjøre denne kommandoen nå?"; then
-        msg "Kjører ..."
-        ut=$(bash -c "$blokk" 2>&1) || true
-        printf '\n%s\n\n' "$ut" >&2
+        msg "Kjører — output vises live her. Spør kommandoen om noe (f.eks. apt sitt Y/n), svar direkte:"
+        printf '\n' >&2
+        ut=$(stdbuf -oL -eL bash -c "$blokk" < "$TTY" 2>&1 | tee "$TTY") || true
+        printf '\n' >&2
         kommando_resultat="$kommando_resultat
 
 \$ $blokk
