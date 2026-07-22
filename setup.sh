@@ -600,12 +600,14 @@ ai_samtale_loop() { # ai_samtale_loop <leverandor> <nokkel> <rapport> -> sluttvu
     # stedet for å tvinge brukeren til å kjøre kommandoer manuelt et annet sted.
     local fence_re='^```(bash|sh|shell)?[[:space:]]*$'
     local -a blokker=()
-    local inn=0 blokk="" linje
+    local inn=0 blokk="" linje prosa=""
     while IFS= read -r linje; do
       if [[ "$linje" =~ $fence_re ]]; then
         if [ "$inn" -eq 1 ]; then blokker+=("$blokk"); blokk=""; inn=0; else inn=1; blokk=""; fi
       elif [ "$inn" -eq 1 ]; then
         blokk+="$linje"$'\n'
+      else
+        prosa+="$linje"$'\n'
       fi
     done <<< "$tekst"
 
@@ -647,6 +649,11 @@ $ut
 
     if [ -n "$kommando_resultat" ]; then
       local tillegg
+      if [ -n "${prosa//[[:space:]]/}" ]; then
+        sep
+        msg "Spørsmålet AI-en stilte (gjentatt, så du slipper å skrolle opp forbi kommando-output):"
+        printf '\n%s\n' "$prosa" >&2
+      fi
       read -rp "Stilte AI-en et spørsmål i teksten over? Skriv svaret ditt her (Enter for å gå videre uten): " tillegg < "$TTY"
       svar_bruker="Resultat av kommandoene AI-en ba om:${kommando_resultat}"
       [ -n "$tillegg" ] && svar_bruker="$svar_bruker"$'\n\nEkstra kommentar fra brukeren: '"$tillegg"
