@@ -435,6 +435,20 @@ pve_menu() {
   sep
   msg "Proxmox-vert oppdaget"
   msg "Denne serveren er selve Proxmox-hosten, ikke en gjest."
+  if whiptail_klar; then
+    local tag
+    tag=$(whiptail --title "Proxmox-vert oppdaget" --ok-button "OK" --cancel-button "Avbryt" \
+      --menu "Denne serveren er selve Proxmox-hosten, ikke en gjest. Velg handling:" 15 90 3 \
+      1 "Systemendringer på hosten (VE-oppgradering, GPU-drivere, m.m.)" \
+      2 "Opprette og sette opp en ny CT" \
+      3 "Avbryt" \
+      3>&1 1>&2 2>&3 < "$TTY") || { msg "Avbryter uten å gjøre endringer."; return; }
+    case "$tag" in
+      1) systemmeny; return ;;
+      2) create_ct; return ;;
+      3) msg "Avbryter uten å gjøre endringer."; return ;;
+    esac
+  fi
   local valg
   while true; do
     printf '  1) Systemendringer på hosten (VE-oppgradering, GPU-drivere, m.m.)\n' >&2
