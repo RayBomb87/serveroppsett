@@ -626,12 +626,12 @@ ai_modell_valg() { # ai_modell_valg <leverandor> -> modell-ID på stdout, eller 
   done
 }
 
-ai_kall() { # ai_kall <leverandor> <api_nokkel> <system> <meldinger_json> -> assistentens tekst på stdout
-  local leverandor=$1 nokkel=$2 system=$3 meldinger=$4 body respons http_kode svar tekst
+ai_kall() { # ai_kall <leverandor> <modell> <api_nokkel> <system> <meldinger_json> -> assistentens tekst på stdout
+  local leverandor=$1 modell=$2 nokkel=$3 system=$4 meldinger=$5 body respons http_kode svar tekst
   case "$leverandor" in
     anthropic)
-      body=$(jq -n --arg sys "$system" --argjson msgs "$meldinger" \
-        '{model:"claude-sonnet-5", max_tokens:4096, thinking:{type:"disabled"}, system:$sys, messages:$msgs}')
+      body=$(jq -n --arg m "$modell" --arg sys "$system" --argjson msgs "$meldinger" \
+        '{model:$m, max_tokens:4096, thinking:{type:"disabled"}, system:$sys, messages:$msgs}')
       respons=$(curl -sSL -w '\n%{http_code}' https://api.anthropic.com/v1/messages \
         -H "content-type: application/json" \
         -H "x-api-key: $nokkel" \
@@ -639,8 +639,8 @@ ai_kall() { # ai_kall <leverandor> <api_nokkel> <system> <meldinger_json> -> ass
         -d "$body") || { msg "AI-kall feilet (nettverksfeil mot Anthropic — sjekk internettforbindelsen)."; return 1; }
       ;;
     openai)
-      body=$(jq -n --arg sys "$system" --argjson msgs "$meldinger" \
-        '{model:"gpt-4o", max_tokens:4096, messages: ([{role:"system", content:$sys}] + $msgs)}')
+      body=$(jq -n --arg m "$modell" --arg sys "$system" --argjson msgs "$meldinger" \
+        '{model:$m, max_tokens:4096, messages: ([{role:"system", content:$sys}] + $msgs)}')
       respons=$(curl -sSL -w '\n%{http_code}' https://api.openai.com/v1/chat/completions \
         -H "content-type: application/json" \
         -H "Authorization: Bearer $nokkel" \
@@ -680,13 +680,13 @@ ai_kall() { # ai_kall <leverandor> <api_nokkel> <system> <meldinger_json> -> ass
   printf '%s' "$tekst"
 }
 
-ai_samtale_loop() { # ai_samtale_loop <leverandor> <nokkel> <rapport> -> sluttvurdering-tekst på stdout (tom hvis AI-kall feilet)
-  local leverandor=$1 nokkel=$2 rapport=$3
+ai_samtale_loop() { # ai_samtale_loop <leverandor> <modell> <nokkel> <rapport> -> sluttvurdering-tekst på stdout (tom hvis AI-kall feilet)
+  local leverandor=$1 modell=$2 nokkel=$3 rapport=$4
   local system meldinger_json runde tekst siste_tekst="" svar_bruker
   system="Du er en forsiktig, erfaren Proxmox-administrator som hjelper brukeren å vurdere risikoen ved en VE-oppgradering. Du får en rå pve*to*-rapport. Hvis du trenger mer informasjon fra selve serveren: IKKE be brukeren om å kjøre kommandoer manuelt selv — skriv i stedet kommandoen(e) i en \`\`\`bash-kodeblokk (bruk nøyaktig språktaggen «bash»). Skriptet viser kommandoen til brukeren, spør om lov, kjører den på serveren hvis godkjent, og sender deg output automatisk i neste runde. Foretrekk lesende/diagnostiske kommandoer. Undersøk tekniske fakta selv med \`\`\`bash-kommandoer (f.eks. lspci for maskinvare/GPU-modell, dpkg -l eller apt-cache policy for pakke-/driverversjoner) i stedet for å spørre brukeren om noe du kan sjekke direkte — bruk kun fri tekst til å spørre brukeren om egne preferanser, driftsbeslutninger, eller bekreftelse på risikofylte steg. Bruk apt-get (ikke apt) til pakkehåndtering (install/remove/purge/update/upgrade) — apt gir en skremmende «CLI-grensesnittet er ustabilt»-advarsel som apt-get ikke gjør, og resten av dette skriptet bruker apt-get konsekvent. Bruk «dpkg -l» i stedet for «apt list» for å liste installerte pakker. Still oppfølgingsspørsmål i fri tekst kun når du trenger en vurdering eller et valg fra brukeren selv, ikke maskindata. Når du er klar til å konkludere, AVSLUTT svaret ditt med en egen linje som starter nøyaktig med «SLUTTVURDERING: JA» eller «SLUTTVURDERING: NEI», etterfulgt av en kort begrunnelse. VIKTIG: bruk ALDRI denne markøren i samme svar som du ber om å få kjørt kommandoer eller stiller et åpent spørsmål til brukeren — SLUTTVURDERING betyr at du er helt ferdig og ikke trenger noe mer."
   meldinger_json=$(jq -n --arg r "$rapport" '[{role:"user", content: ("Her er rapporten:\n\n" + $r)}]')
   for runde in $(seq 1 12); do
-    tekst=$(ai_kall "$leverandor" "$nokkel" "$system" "$meldinger_json") || { printf ''; return; }
+    tekst=$(ai_kall "$leverandor" "$modell" "$nokkel" "$system" "$meldinger_json") || { printf ''; return; }
     siste_tekst=$tekst
 
     # Pluk ut ```bash/sh/shell-kodeblokker AI-en ba om å få kjørt — vis, spør,
@@ -763,15 +763,15 @@ $ut
   msg "12 runder brukt uten en tydelig sluttvurdering — ber AI-en konkludere nå."
   meldinger_json=$(printf '%s' "$meldinger_json" | jq \
     '. + [{role:"user", content:"Du har ikke flere runder igjen. Gi din beste sluttvurdering NÅ, basert på alt vi har diskutert, med SLUTTVURDERING-linjen."}]')
-  tekst=$(ai_kall "$leverandor" "$nokkel" "$system" "$meldinger_json") || { printf '%s' "$siste_tekst"; return; }
+  tekst=$(ai_kall "$leverandor" "$modell" "$nokkel" "$system" "$meldinger_json") || { printf '%s' "$siste_tekst"; return; }
   printf '%s' "$tekst"
 }
 
-ai_konfigfil_policy() { # ai_konfigfil_policy <leverandor> <nokkel> <rapport> -> "confold"|"confnew"-linje fra AI-en, tom hvis feilet
-  local leverandor=$1 nokkel=$2 rapport=$3 system meldinger_json tekst
+ai_konfigfil_policy() { # ai_konfigfil_policy <leverandor> <modell> <nokkel> <rapport> -> "confold"|"confnew"-linje fra AI-en, tom hvis feilet
+  local leverandor=$1 modell=$2 nokkel=$3 rapport=$4 system meldinger_json tekst
   system="Du er en forsiktig Proxmox-administrator. Basert på rapporten under, anbefal ENTEN 'confold' (behold brukerens egne tilpasninger av config-filer) ELLER 'confnew' (bruk vedlikeholders nye versjon) som ÉN global policy for hele oppgraderingen. Svar med en linje som starter med 'ANBEFALING: confold' eller 'ANBEFALING: confnew', etterfulgt av en kort begrunnelse."
   meldinger_json=$(jq -n --arg r "$rapport" '[{role:"user", content: ("Rapport:\n\n" + $r)}]')
-  tekst=$(ai_kall "$leverandor" "$nokkel" "$system" "$meldinger_json") || { printf ''; return; }
+  tekst=$(ai_kall "$leverandor" "$modell" "$nokkel" "$system" "$meldinger_json") || { printf ''; return; }
   msg "AI-ens anbefaling om config-fil-håndtering:"
   printf '\n%s\n\n' "$tekst" >&2
   printf '%s' "$tekst"
@@ -795,10 +795,16 @@ handling_ve-oppgradering() {
   msg "Rå rapport fra $verktoy:"
   printf '\n%s\n\n' "$rapport" >&2
 
-  local leverandor="" nokkel="" anbefaling=""
+  local leverandor="" modell="" nokkel="" anbefaling=""
   if ask_yesno "Vil du ha AI-assistert risikovurdering av rapporten?"; then
     ensure_jq
-    leverandor=$(ai_leverandor_valg)
+    while true; do
+      leverandor=$(ai_leverandor_valg)
+      [ -z "$leverandor" ] && break
+      modell=$(ai_modell_valg "$leverandor")
+      [ "$modell" = TILBAKE ] && continue
+      break
+    done
     if [ -n "$leverandor" ]; then
       local nokkel_url=""
       case "$leverandor" in
@@ -809,7 +815,7 @@ handling_ve-oppgradering() {
       nokkel=$(ask_secret "API-nøkkel for $leverandor (kun i minnet denne kjøringen, aldri lagret)")
       sep
       msg "Starter AI-samtale om oppgraderingen (maks 12 runder) ..."
-      anbefaling=$(ai_samtale_loop "$leverandor" "$nokkel" "$rapport")
+      anbefaling=$(ai_samtale_loop "$leverandor" "$modell" "$nokkel" "$rapport")
       if [ -n "$anbefaling" ]; then
         sep
         msg "AI-ens sluttvurdering:"
@@ -834,7 +840,7 @@ handling_ve-oppgradering() {
   local anbefalt_policy="" konfigpolicy policy_svar
   if [ -n "$leverandor" ]; then
     msg "Spør AI-en om anbefaling for config-fil-håndtering ..."
-    anbefalt_policy=$(ai_konfigfil_policy "$leverandor" "$nokkel" "$rapport" | grep -oP "ANBEFALING:\s*\Kconf(old|new)" | head -1) || true
+    anbefalt_policy=$(ai_konfigfil_policy "$leverandor" "$modell" "$nokkel" "$rapport" | grep -oP "ANBEFALING:\s*\Kconf(old|new)" | head -1) || true
   fi
   sep
   msg "apt dist-upgrade kan støte på config-filer du har endret manuelt (f.eks. nettverksoppsett). Da må den vite på forhånd hvilken versjon den skal beholde — for ALLE slike filer under denne oppgraderingen:"
