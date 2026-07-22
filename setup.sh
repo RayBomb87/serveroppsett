@@ -783,8 +783,8 @@ handling_ve-oppgradering() {
     confold) force_flag='--force-confold' ;;
     confnew) force_flag='--force-confnew' ;;
   esac
-  apt-get -o "Dpkg::Options::=$force_flag" dist-upgrade \
-    || die "apt-get dist-upgrade feilet — systemet kan være i en delvis oppgradert tilstand. Undersøk manuelt før du fortsetter."
+  apt-get -o "Dpkg::Options::=$force_flag" dist-upgrade < "$TTY" \
+    || die "apt-get dist-upgrade feilet — sjekk output over. Hvis den bare abortere på et Y/n-spørsmål er ingen pakker endret ennå og det er trygt å prøve igjen; hvis den feilet midt i nedlasting/installasjon kan systemet være i en delvis oppgradert tilstand og bør undersøkes manuelt."
   ok "Oppgradering til PVE $neste fullført."
 
   if ask_yesno "Starte serveren på nytt nå?"; then
