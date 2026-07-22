@@ -43,6 +43,32 @@ whiptail_klar() { # -> exit 0 hvis whiptail kan brukes, ellers 1 (sjekker/instal
   return 1
 }
 
+bekreft_kommando() { # bekreft_kommando <overskrift> <kommandoblokk> -> exit 0=ja 1=nei
+  # Selve kommandoteksten MÅ inn i whiptail-boksen (ikke bare skrives ut før
+  # kallet) - whiptail tegner fullskjerm og visker ellers bort alt som sto
+  # på skjermen rett før, inkl. kommandoen brukeren skal godkjenne.
+  local heading=$1 blokk=$2
+  if whiptail_klar; then
+    local tekst bredde hoyde linjer
+    tekst="$heading
+
+$blokk
+
+Kjøre denne kommandoen nå?"
+    bredde=$(whiptail_bredde "$tekst")
+    [ "$bredde" -gt 110 ] && bredde=110
+    linjer=$(printf '%s\n' "$tekst" | wc -l)
+    hoyde=$((linjer + 8))
+    [ "$hoyde" -gt 30 ] && hoyde=30
+    whiptail --title "Bekreft kommando" --yes-button "Ja" --no-button "Nei" \
+      --yesno "$tekst" "$hoyde" "$bredde" 3>&1 1>&2 2>&3 < "$TTY"
+    return $?
+  fi
+  msg "$heading"
+  printf '\n%s\n\n' "$blokk" >&2
+  ask_yesno "Kjøre denne kommandoen nå?"
+}
+
 whiptail_bredde() { # whiptail_bredde <linje/flerlinjestreng> ... -> bredde på stdout (lengste linje + margin, med gulv på 40)
   local bredde=40 arg sub
   for arg in "$@"; do
@@ -765,9 +791,7 @@ ai_samtale_loop() { # ai_samtale_loop <leverandor> <modell> <nokkel> <rapport> -
     for blokk in "${blokker[@]}"; do
       [ -n "${blokk//[[:space:]]/}" ] || continue
       sep
-      msg "AI-en foreslår å kjøre dette på serveren (samme rettigheter som dette skriptet, vanligvis root — les nøye):"
-      printf '\n%s\n\n' "$blokk" >&2
-      if ask_yesno "Kjøre denne kommandoen nå?"; then
+      if bekreft_kommando "AI-en foreslår å kjøre dette på serveren (samme rettigheter som dette skriptet, vanligvis root - les nøye):" "$blokk"; then
         msg "Kjører — output vises live her. Spør kommandoen om noe (f.eks. apt sitt Y/n), svar direkte:"
         printf '\n' >&2
         ut=$(stdbuf -oL -eL bash -c "$blokk" < "$TTY" 2>&1 | tee "$TTY") || true
