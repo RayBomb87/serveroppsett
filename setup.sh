@@ -8,8 +8,12 @@ APPS_CONF=/etc/serveroppsett-apps.conf
 TTY=/dev/tty
 
 # Unngå apt-listchanges/perl sine harmløse "Cannot set locale"-varsler på
-# ferske maler uten genererte locales (kun C er alltid tilgjengelig).
-export LC_ALL=C
+# ferske maler uten genererte locales. C.UTF-8 er alltid tilgjengelig uten
+# locale-gen (innebygd i glibc, samme prinsipp som step_locale() lenger ned) -
+# MÅ være UTF-8 og ikke bare "C", ellers regner whiptail feil skjermbredde
+# på æøå og andre multi-byte-tegn (bekreftet live 22. juli 2026: "C" fikk
+# whiptail-bokser til å bli skjeve i høyrekant på linjer med norske tegn).
+export LC_ALL=C.UTF-8
 export LANGUAGE=C
 export APT_LISTCHANGES_FRONTEND=none
 
