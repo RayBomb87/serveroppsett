@@ -759,16 +759,19 @@ handling_ve-oppgradering() {
   msg "Klar til å oppgradere fra PVE $n til PVE $neste ($gammelt_navn → $nytt_navn)."
   msg "Dette bytter apt-kildene, kjører apt update, og deretter apt dist-upgrade interaktivt i forgrunnen."
   local bekreft
-  bekreft=$(ask "Skriv nøyaktig «ja, kjør oppgraderingen» for å fortsette — alt annet avbryter uten endringer")
-  if [ "$bekreft" != "ja, kjør oppgraderingen" ]; then
-    msg "Avbryter — ingen endringer gjort."
-    return
-  fi
+  while true; do
+    bekreft=$(ask "Skriv «ja» for å starte selve oppgraderingen nå (eller «nei» for å la være)")
+    case "$bekreft" in
+      [Jj][Aa]) break ;;
+      [Nn][Ee][Ii]|[Nn]) msg "Avbryter — ingen endringer gjort."; return ;;
+      *) msg "Ugyldig svar: «$bekreft» — skriv «ja» eller «nei»." ;;
+    esac
+  done
 
   msg "Bytter apt-kilder fra $gammelt_navn til $nytt_navn ..."
   grep -rl "$gammelt_navn" /etc/apt/sources.list /etc/apt/sources.list.d/ 2>/dev/null | while read -r f; do
     sed -i "s/\b$gammelt_navn\b/$nytt_navn/g" "$f"
-  done
+  done || true
   ok "Apt-kilder oppdatert."
 
   msg "Kjører apt-get update ..."
