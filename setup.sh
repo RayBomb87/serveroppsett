@@ -576,7 +576,7 @@ ai_kall() { # ai_kall <leverandor> <api_nokkel> <system> <meldinger_json> -> ass
 ai_samtale_loop() { # ai_samtale_loop <leverandor> <nokkel> <rapport> -> sluttvurdering-tekst på stdout (tom hvis AI-kall feilet)
   local leverandor=$1 nokkel=$2 rapport=$3
   local system meldinger_json runde tekst siste_tekst="" svar_bruker
-  system="Du er en forsiktig, erfaren Proxmox-administrator som hjelper brukeren å vurdere risikoen ved en VE-oppgradering. Du får en rå pve*to*-rapport. Still ETT konkret oppfølgingsspørsmål om gangen hvis du trenger mer informasjon for å gi en trygg anbefaling. Når du er klar til å konkludere, AVSLUTT svaret ditt med en egen linje som starter nøyaktig med «SLUTTVURDERING: JA» eller «SLUTTVURDERING: NEI», etterfulgt av en kort begrunnelse. Ikke bruk denne markøren før du faktisk konkluderer."
+  system="Du er en forsiktig, erfaren Proxmox-administrator som hjelper brukeren å vurdere risikoen ved en VE-oppgradering. Du får en rå pve*to*-rapport. Hvis du trenger mer informasjon fra selve serveren: IKKE be brukeren om å kjøre kommandoer manuelt selv — skriv i stedet kommandoen(e) i en \`\`\`bash-kodeblokk (bruk nøyaktig språktaggen «bash»). Skriptet viser kommandoen til brukeren, spør om lov, kjører den på serveren hvis godkjent, og sender deg output automatisk i neste runde. Foretrekk lesende/diagnostiske kommandoer. Still oppfølgingsspørsmål i fri tekst kun når du trenger en vurdering eller et valg fra brukeren selv, ikke maskindata. Når du er klar til å konkludere, AVSLUTT svaret ditt med en egen linje som starter nøyaktig med «SLUTTVURDERING: JA» eller «SLUTTVURDERING: NEI», etterfulgt av en kort begrunnelse. Ikke bruk denne markøren før du faktisk konkluderer."
   meldinger_json=$(jq -n --arg r "$rapport" '[{role:"user", content: ("Her er rapporten:\n\n" + $r)}]')
   for runde in $(seq 1 12); do
     tekst=$(ai_kall "$leverandor" "$nokkel" "$system" "$meldinger_json") || { printf ''; return; }
@@ -586,7 +586,55 @@ ai_samtale_loop() { # ai_samtale_loop <leverandor> <nokkel> <rapport> -> sluttvu
     fi
     msg "AI-en spør (runde $runde/12):"
     printf '\n%s\n\n' "$tekst" >&2
-    svar_bruker=$(ask "Ditt svar")
+
+    # Pluk ut ```bash/sh/shell-kodeblokker AI-en ba om å få kjørt — vis, spør,
+    # kjør på serveren ved godkjenning, og send output automatisk tilbake i
+    # stedet for å tvinge brukeren til å kjøre kommandoer manuelt et annet sted.
+    local fence_re='^```(bash|sh|shell)?[[:space:]]*$'
+    local -a blokker=()
+    local inn=0 blokk="" linje
+    while IFS= read -r linje; do
+      if [[ "$linje" =~ $fence_re ]]; then
+        if [ "$inn" -eq 1 ]; then blokker+=("$blokk"); blokk=""; inn=0; else inn=1; blokk=""; fi
+      elif [ "$inn" -eq 1 ]; then
+        blokk+="$linje"$'\n'
+      fi
+    done <<< "$tekst"
+
+    local kommando_resultat="" ut
+    for blokk in "${blokker[@]}"; do
+      [ -n "${blokk//[[:space:]]/}" ] || continue
+      sep
+      msg "AI-en foreslår å kjøre dette på serveren (samme rettigheter som dette skriptet, vanligvis root — les nøye):"
+      printf '\n%s\n\n' "$blokk" >&2
+      if ask_yesno "Kjøre denne kommandoen nå?"; then
+        msg "Kjører ..."
+        ut=$(bash -c "$blokk" 2>&1) || true
+        printf '\n%s\n\n' "$ut" >&2
+        kommando_resultat="$kommando_resultat
+
+\$ $blokk
+--- output ---
+$ut
+"
+      else
+        kommando_resultat="$kommando_resultat
+
+\$ $blokk
+(brukeren valgte å ikke kjøre denne kommandoen)
+"
+      fi
+    done
+
+    if [ -n "$kommando_resultat" ]; then
+      local tillegg
+      read -rp "Noe mer du vil legge til før dette sendes til AI-en? (Enter for å hoppe over): " tillegg < "$TTY"
+      svar_bruker="Resultat av kommandoene AI-en ba om:${kommando_resultat}"
+      [ -n "$tillegg" ] && svar_bruker="$svar_bruker"$'\n\nEkstra kommentar fra brukeren: '"$tillegg"
+    else
+      svar_bruker=$(ask "Ditt svar")
+    fi
+
     meldinger_json=$(printf '%s' "$meldinger_json" | jq --arg a "$tekst" --arg u "$svar_bruker" \
       '. + [{role:"assistant", content:$a}, {role:"user", content:$u}]')
   done
