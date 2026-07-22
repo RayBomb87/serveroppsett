@@ -7,6 +7,20 @@ ADMIN_CONF=/etc/serveroppsett-admin.conf
 APPS_CONF=/etc/serveroppsett-apps.conf
 TTY=/dev/tty
 
+# Ved "curl | bash" er skriptets egen stdin (fd 0) selve curl-pipen, ikke
+# terminalen. Hvert whiptail/read-kall kobler eksplisitt om til $TTY, men et
+# race ved skriptets ALLER FØRSTE whiptail-dialog (pve_menu) ble observert
+# live 22. juli 2026 på to forskjellige Proxmox-verter, begge kjørt via
+# "curl | sudo bash" med sudo sin egen use_pty (bekreftet aktiv i sudoers):
+# boksen tegnet seg, men piltaster ble ekko-et rått i stedet for å styre
+# whiptail. Nedlastet fil + "bash fil.sh" (stdin allerede ekte terminal fra
+# start) hadde ALDRI problemet - fikset her ved å koble om skriptets egen
+# stdin til terminalen permanent, så snart som mulig, i stedet for å
+# stole på per-kall-redirects alene.
+if [ ! -t 0 ] && [ -r "$TTY" ]; then
+  exec < "$TTY"
+fi
+
 # Unngå apt-listchanges/perl sine harmløse "Cannot set locale"-varsler på
 # ferske maler uten genererte locales. C.UTF-8 er alltid tilgjengelig uten
 # locale-gen (innebygd i glibc, samme prinsipp som step_locale() lenger ned) -
