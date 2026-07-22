@@ -576,16 +576,11 @@ ai_kall() { # ai_kall <leverandor> <api_nokkel> <system> <meldinger_json> -> ass
 ai_samtale_loop() { # ai_samtale_loop <leverandor> <nokkel> <rapport> -> sluttvurdering-tekst på stdout (tom hvis AI-kall feilet)
   local leverandor=$1 nokkel=$2 rapport=$3
   local system meldinger_json runde tekst siste_tekst="" svar_bruker
-  system="Du er en forsiktig, erfaren Proxmox-administrator som hjelper brukeren å vurdere risikoen ved en VE-oppgradering. Du får en rå pve*to*-rapport. Hvis du trenger mer informasjon fra selve serveren: IKKE be brukeren om å kjøre kommandoer manuelt selv — skriv i stedet kommandoen(e) i en \`\`\`bash-kodeblokk (bruk nøyaktig språktaggen «bash»). Skriptet viser kommandoen til brukeren, spør om lov, kjører den på serveren hvis godkjent, og sender deg output automatisk i neste runde. Foretrekk lesende/diagnostiske kommandoer. Still oppfølgingsspørsmål i fri tekst kun når du trenger en vurdering eller et valg fra brukeren selv, ikke maskindata. Når du er klar til å konkludere, AVSLUTT svaret ditt med en egen linje som starter nøyaktig med «SLUTTVURDERING: JA» eller «SLUTTVURDERING: NEI», etterfulgt av en kort begrunnelse. Ikke bruk denne markøren før du faktisk konkluderer."
+  system="Du er en forsiktig, erfaren Proxmox-administrator som hjelper brukeren å vurdere risikoen ved en VE-oppgradering. Du får en rå pve*to*-rapport. Hvis du trenger mer informasjon fra selve serveren: IKKE be brukeren om å kjøre kommandoer manuelt selv — skriv i stedet kommandoen(e) i en \`\`\`bash-kodeblokk (bruk nøyaktig språktaggen «bash»). Skriptet viser kommandoen til brukeren, spør om lov, kjører den på serveren hvis godkjent, og sender deg output automatisk i neste runde. Foretrekk lesende/diagnostiske kommandoer. Still oppfølgingsspørsmål i fri tekst kun når du trenger en vurdering eller et valg fra brukeren selv, ikke maskindata. Når du er klar til å konkludere, AVSLUTT svaret ditt med en egen linje som starter nøyaktig med «SLUTTVURDERING: JA» eller «SLUTTVURDERING: NEI», etterfulgt av en kort begrunnelse. VIKTIG: bruk ALDRI denne markøren i samme svar som du ber om å få kjørt kommandoer eller stiller et åpent spørsmål til brukeren — SLUTTVURDERING betyr at du er helt ferdig og ikke trenger noe mer."
   meldinger_json=$(jq -n --arg r "$rapport" '[{role:"user", content: ("Her er rapporten:\n\n" + $r)}]')
   for runde in $(seq 1 12); do
     tekst=$(ai_kall "$leverandor" "$nokkel" "$system" "$meldinger_json") || { printf ''; return; }
     siste_tekst=$tekst
-    if printf '%s' "$tekst" | grep -q 'SLUTTVURDERING:'; then
-      printf '%s' "$tekst"; return
-    fi
-    msg "AI-en spør (runde $runde/12):"
-    printf '\n%s\n\n' "$tekst" >&2
 
     # Pluk ut ```bash/sh/shell-kodeblokker AI-en ba om å få kjørt — vis, spør,
     # kjør på serveren ved godkjenning, og send output automatisk tilbake i
@@ -600,6 +595,16 @@ ai_samtale_loop() { # ai_samtale_loop <leverandor> <nokkel> <rapport> -> sluttvu
         blokk+="$linje"$'\n'
       fi
     done <<< "$tekst"
+
+    # En SLUTTVURDERING telles kun som endelig hvis AI-en IKKE samtidig ber om
+    # å få kjørt kommandoer — noen ganger skriver den markøren for tidlig ved
+    # siden av et oppfølgingsspørsmål, og da er den åpenbart ikke ferdig ennå.
+    if [ "${#blokker[@]}" -eq 0 ] && printf '%s' "$tekst" | grep -q 'SLUTTVURDERING:'; then
+      printf '%s' "$tekst"; return
+    fi
+
+    msg "AI-en spør (runde $runde/12):"
+    printf '\n%s\n\n' "$tekst" >&2
 
     local kommando_resultat="" ut
     for blokk in "${blokker[@]}"; do
