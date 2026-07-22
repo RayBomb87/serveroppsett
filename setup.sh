@@ -39,6 +39,16 @@ whiptail_klar() { # -> exit 0 hvis whiptail kan brukes, ellers 1 (sjekker/instal
   return 1
 }
 
+whiptail_bredde() { # whiptail_bredde <linje/flerlinjestreng> ... -> bredde på stdout (lengste linje + margin, med gulv på 40)
+  local bredde=40 arg sub
+  for arg in "$@"; do
+    while IFS= read -r sub; do
+      [ "${#sub}" -gt "$bredde" ] && bredde=${#sub}
+    done <<< "$arg"
+  done
+  printf '%d' "$((bredde + 8))"
+}
+
 ask() { # ask "Spørsmål" [default] -> svar på stdout
   local q=$1 def=${2:-} svar
   if whiptail_klar; then
@@ -556,9 +566,11 @@ finn_kildekodenavn() { # finn_kildekodenavn <fra> <til> -> "gammelt nytt" på st
 
 ai_leverandor_valg() { # -> "anthropic" | "openai" | "gemini" | "" (ingen) på stdout
   if whiptail_klar; then
-    local tag
+    local tag sporsmal bredde
+    sporsmal=$'Vil du ha AI-assistert\nrisikovurdering av oppgraderingsrapporten?'
+    bredde=$(whiptail_bredde "$sporsmal" "Anthropic Claude" "OpenAI" "Google Gemini" "Nei - vis kun rå rapport")
     tag=$(whiptail --title "AI-assistert risikovurdering" --ok-button "OK" --cancel-button "Avbryt" \
-      --menu "Vil du ha AI-assistert risikovurdering av oppgraderingsrapporten?" 16 76 4 \
+      --menu "$sporsmal" 15 "$bredde" 4 \
       1 "Anthropic Claude" \
       2 "OpenAI" \
       3 "Google Gemini" \
@@ -605,19 +617,23 @@ ai_modell_valg() { # ai_modell_valg <leverandor> -> modell-ID på stdout, eller 
       beste_id=gemini-2.5-pro;      beste_navn="Gemini 2.5 Pro";      beste_inn=1.25; beste_ut=10.00
       ;;
   esac
-  local forklaring="Pris per 1 million tokens (inn/ut). Faktisk kostnad avhenger av rapportstørrelse og antall samtalerunder (opptil 12) - typisk et lite antall øre til noen få kroner for en full vurdering. Prisene er et øyeblikksbilde og kan avvike fra leverandørens gjeldende priser."
+  local forklaring="Pris per 1 million tokens (inn/ut). Faktisk kostnad avhenger av rapportstørrelse og antall samtalerunder (opptil 12) - typisk et lite antall øre til noen få kroner for en full vurdering. Prisene er et øyeblikksbilde og kan avvike fra leverandørens gjeldende priser. Priser sist bekreftet 22. juli 2026."
   local forklaring_wt="Pris per 1 million tokens (inn/ut).
 Faktisk kostnad avhenger av rapportstørrelse
 og antall samtalerunder (opptil 12) -
 typisk noen få øre til noen få kroner
 for en full vurdering. Prisene kan avvike
-noe fra leverandørens gjeldende priser."
+noe fra leverandørens gjeldende priser.
+Priser sist bekreftet 22. juli 2026."
   if whiptail_klar; then
-    local tag
+    local tag item1 item2 bredde
+    item1="$god_navn - \$$god_inn / \$$god_ut per 1M"
+    item2="$beste_navn - \$$beste_inn / \$$beste_ut per 1M"
+    bredde=$(whiptail_bredde "$forklaring_wt" "$item1" "$item2" "Bytt AI-tjeneste")
     tag=$(whiptail --title "Velg AI-modell" --ok-button "OK" --cancel-button "Avbryt" \
-      --menu "$forklaring_wt" 20 78 3 \
-      1 "$god_navn - \$$god_inn / \$$god_ut per 1M" \
-      2 "$beste_navn - \$$beste_inn / \$$beste_ut per 1M" \
+      --menu "$forklaring_wt" 20 "$bredde" 3 \
+      1 "$item1" \
+      2 "$item2" \
       3 "Bytt AI-tjeneste" \
       3>&1 1>&2 2>&3 < "$TTY") || { printf 'AVBRYT'; return; }
     case "$tag" in
