@@ -133,6 +133,71 @@ Ditt svar:"
   ask "Ditt svar"
 }
 
+sporsmal_konfigpolicy() { # sporsmal_konfigpolicy [ai_anbefaling] -> "confold"|"confnew" på stdout (spør på nytt til gyldig valg)
+  local anbefaling=${1:-}
+  local forklaring="apt dist-upgrade kan støte på config-filer du har endret manuelt (f.eks. nettverksoppsett). Da må den vite på forhånd hvilken versjon den skal beholde - for ALLE slike filer under denne oppgraderingen."
+  local item1="confold - behold mine tilpasninger (tryggest for en produksjonshypervisor)"
+  local item2="confnew - bruk vedlikeholders nye versjon"
+  if whiptail_klar; then
+    local tekst bredde tag
+    tekst=$(printf '%s' "$forklaring" | fold -s -w 96)
+    [ -n "$anbefaling" ] && tekst="$tekst
+
+AI-en anbefaler: $anbefaling"
+    bredde=$(whiptail_bredde "$tekst" "$item1" "$item2")
+    [ "$bredde" -gt 100 ] && bredde=100
+    while true; do
+      tag=$(whiptail --title "Config-fil-håndtering" --ok-button "OK" --cancel-button "Avbryt" \
+        --menu "$tekst" 22 "$bredde" 2 \
+        1 "$item1" \
+        2 "$item2" \
+        3>&1 1>&2 2>&3 < "$TTY") || continue
+      case "$tag" in
+        1) printf 'confold'; return ;;
+        2) printf 'confnew'; return ;;
+      esac
+    done
+  fi
+  msg "$forklaring"
+  msg "  $item1"
+  msg "  $item2"
+  [ -n "$anbefaling" ] && msg "AI-en anbefaler: $anbefaling"
+  local policy_svar
+  while true; do
+    read -rp "Velg policy [confold/confnew]: " policy_svar < "$TTY"
+    case "$policy_svar" in
+      confold|confnew) printf '%s' "$policy_svar"; return ;;
+      *) msg "Ugyldig valg: «$policy_svar» — skriv confold eller confnew." ;;
+    esac
+  done
+}
+
+bekreft_oppgradering() { # bekreft_oppgradering <n> <neste> <gammelt_navn> <nytt_navn> -> exit 0=ja 1=nei
+  local n=$1 neste=$2 gammelt=$3 nytt=$4
+  if whiptail_klar; then
+    local tekst
+    tekst="Klar til å oppgradere fra PVE $n til PVE $neste ($gammelt -> $nytt).
+
+Dette bytter apt-kildene, kjører apt update, og deretter apt dist-upgrade interaktivt i forgrunnen.
+
+Starte oppgraderingen nå?"
+    whiptail --title "Bekreft oppgradering" --yes-button "Ja" --no-button "Nei" \
+      --yesno "$tekst" 14 90 3>&1 1>&2 2>&3 < "$TTY"
+    return $?
+  fi
+  msg "Klar til å oppgradere fra PVE $n til PVE $neste ($gammelt → $nytt)."
+  msg "Dette bytter apt-kildene, kjører apt update, og deretter apt dist-upgrade interaktivt i forgrunnen."
+  local bekreft
+  while true; do
+    bekreft=$(ask "Skriv «ja» for å starte selve oppgraderingen nå (eller «nei» for å la være)")
+    case "$bekreft" in
+      [Jj][Aa]) return 0 ;;
+      [Nn][Ee][Ii]|[Nn]) return 1 ;;
+      *) msg "Ugyldig svar: «$bekreft» — skriv «ja» eller «nei»." ;;
+    esac
+  done
+}
+
 whiptail_bredde() { # whiptail_bredde <linje/flerlinjestreng> ... -> bredde på stdout (lengste linje + margin, med gulv på 40)
   local bredde=40 arg sub
   for arg in "$@"; do
@@ -910,8 +975,6 @@ ai_konfigfil_policy() { # ai_konfigfil_policy <leverandor> <modell> <nokkel> <ra
   system="Du er en forsiktig Proxmox-administrator. Basert på rapporten under, anbefal ENTEN 'confold' (behold brukerens egne tilpasninger av config-filer) ELLER 'confnew' (bruk vedlikeholders nye versjon) som ÉN global policy for hele oppgraderingen. Svar med en linje som starter med 'ANBEFALING: confold' eller 'ANBEFALING: confnew', etterfulgt av en kort begrunnelse."
   meldinger_json=$(jq -n --arg r "$rapport" '[{role:"user", content: ("Rapport:\n\n" + $r)}]')
   tekst=$(ai_kall "$leverandor" "$modell" "$nokkel" "$system" "$meldinger_json") || { printf ''; return; }
-  msg "AI-ens anbefaling om config-fil-håndtering:"
-  printf '\n%s\n\n' "$tekst" >&2
   printf '%s' "$tekst"
 }
 
@@ -984,36 +1047,19 @@ handling_ve-oppgradering() {
   fi
   read -r gammelt_navn nytt_navn <<< "$kodenavn"
 
-  local anbefalt_policy="" konfigpolicy policy_svar
+  local anbefaling_tekst="" anbefalt_policy="" konfigpolicy
   if [ -n "$leverandor" ]; then
     msg "Spør AI-en om anbefaling for config-fil-håndtering ..."
-    anbefalt_policy=$(ai_konfigfil_policy "$leverandor" "$modell" "$nokkel" "$rapport" | grep -oP "ANBEFALING:\s*\Kconf(old|new)" | head -1) || true
+    anbefaling_tekst=$(ai_konfigfil_policy "$leverandor" "$modell" "$nokkel" "$rapport")
+    anbefalt_policy=$(printf '%s' "$anbefaling_tekst" | grep -oP "ANBEFALING:\s*\Kconf(old|new)" | head -1) || true
+    [ -n "$anbefaling_tekst" ] && vis_ai_tekst "AI-ens anbefaling om config-fil-håndtering:" "$anbefaling_tekst"
   fi
-  sep
-  msg "apt dist-upgrade kan støte på config-filer du har endret manuelt (f.eks. nettverksoppsett). Da må den vite på forhånd hvilken versjon den skal beholde — for ALLE slike filer under denne oppgraderingen:"
-  msg "  confold = behold DINE tilpasninger av config-filer (tryggest for en produksjonshypervisor)"
-  msg "  confnew = bruk vedlikeholders NYE versjon av config-filene"
-  [ -n "$anbefalt_policy" ] && msg "AI-en anbefaler: $anbefalt_policy"
-  while true; do
-    read -rp "Velg policy [confold/confnew]: " policy_svar < "$TTY"
-    case "$policy_svar" in
-      confold|confnew) konfigpolicy=$policy_svar; break ;;
-      *) msg "Ugyldig valg: «$policy_svar» — skriv confold eller confnew." ;;
-    esac
-  done
+  konfigpolicy=$(sporsmal_konfigpolicy "$anbefalt_policy")
 
-  sep
-  msg "Klar til å oppgradere fra PVE $n til PVE $neste ($gammelt_navn → $nytt_navn)."
-  msg "Dette bytter apt-kildene, kjører apt update, og deretter apt dist-upgrade interaktivt i forgrunnen."
-  local bekreft
-  while true; do
-    bekreft=$(ask "Skriv «ja» for å starte selve oppgraderingen nå (eller «nei» for å la være)")
-    case "$bekreft" in
-      [Jj][Aa]) break ;;
-      [Nn][Ee][Ii]|[Nn]) msg "Avbryter — ingen endringer gjort."; return ;;
-      *) msg "Ugyldig svar: «$bekreft» — skriv «ja» eller «nei»." ;;
-    esac
-  done
+  if ! bekreft_oppgradering "$n" "$neste" "$gammelt_navn" "$nytt_navn"; then
+    msg "Avbryter — ingen endringer gjort."
+    return
+  fi
 
   msg "Bytter apt-kilder fra $gammelt_navn til $nytt_navn ..."
   grep -rl "$gammelt_navn" /etc/apt/sources.list /etc/apt/sources.list.d/ 2>/dev/null | while read -r f; do
