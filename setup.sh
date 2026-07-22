@@ -51,6 +51,12 @@ ask_valid() { # ask_valid "Spørsmål" "regex" "feilhint" [default] -> svar (sp�
   done
 }
 
+ask_secret() { # ask_secret "Spørsmål" -> svar på stdout, uten ekko, aldri skrevet til disk
+  local svar
+  read -rsp "$1: " svar < "$TTY"; printf '\n' >&2
+  printf '%s' "$svar"
+}
+
 show_app_info() { # show_app_info <app> -> henter og viser fersk repo-info fra GitHub
   local app=$1 repo json desc stars
   repo=$("app_repo_$app" 2>/dev/null) || { msg "Ingen info-kilde registrert for $app."; return; }
@@ -81,6 +87,41 @@ require_root() { [ "$(id -u)" -eq 0 ] || die "Kjør som root (eller med sudo).";
 
 is_pve_host() { command -v pveversion >/dev/null; }
 
+# SYSTEM_KATALOG — handlinger på selve Proxmox-hosten, samme katalog-mønster
+# som APP_KATALOG. handling_<navn>() gjør jobben, handling_navn_<navn>()
+# returnerer visningsnavnet i menyen. Nye host-handlinger legges til her.
+SYSTEM_KATALOG="ve-oppgradering gpu-drivere"
+
+handling_navn_ve-oppgradering() { printf 'VE-oppgradering (med valgfri AI-vurdering)'; }
+handling_navn_gpu-drivere()     { printf 'GPU-drivere'; }
+
+handling_gpu-drivere() { skip "GPU-drivere er ikke bygget ennå — kommer i en senere oppdatering."; }
+
+systemmeny() { # bygger nummerert liste fra SYSTEM_KATALOG + Avbryt, dispatcher til handling_<navn>
+  local -a navn=()
+  local n
+  for n in $SYSTEM_KATALOG; do navn+=("$n"); done
+  local antall avbryt_nr valg i
+  antall=${#navn[@]}
+  avbryt_nr=$((antall+1))
+  while true; do
+    i=1
+    for n in "${navn[@]}"; do
+      printf '  %d) %s\n' "$i" "$("handling_navn_$n")" >&2
+      i=$((i+1))
+    done
+    printf '  %d) Avbryt\n' "$avbryt_nr" >&2
+    read -rp "Valg [1-$avbryt_nr]: " valg < "$TTY"
+    if [[ "$valg" =~ ^[0-9]+$ ]] && [ "$valg" -ge 1 ] && [ "$valg" -le "$antall" ]; then
+      "handling_${navn[$((valg-1))]}"; return
+    elif [ "$valg" = "$avbryt_nr" ]; then
+      msg "Avbryter uten å gjøre endringer."; return
+    else
+      msg "Ugyldig valg: «$valg» — skriv et tall mellom 1 og $avbryt_nr."
+    fi
+  done
+}
+
 pve_menu() {
   sep
   msg "Proxmox-vert oppdaget"
@@ -92,7 +133,7 @@ pve_menu() {
     printf '  3) Avbryt\n' >&2
     read -rp "Valg [1/2/3]: " valg < "$TTY"
     case "$valg" in
-      1) skip "Systemendringer på hosten er ikke bygget ennå — kommer i en senere oppdatering."; return ;;
+      1) systemmeny; return ;;
       2) create_ct; return ;;
       3) msg "Avbryter uten å gjøre endringer."; return ;;
       *) msg "Ugyldig valg: «$valg» — skriv 1, 2 eller 3." ;;
@@ -414,6 +455,234 @@ create_ct() {
     fi" \
     || die "Bootstrapping av CT $CT_VMID feilet — sjekk pct exec-loggen over."
   ok "CT $CT_VMID ($CT_HOSTNAME) er satt opp."
+}
+
+# --- Systemhandling: VE-oppgradering --------------------------------------
+
+ensure_jq() { # trengs for å bygge/parse JSON trygt til/fra AI-API-ene
+  command -v jq >/dev/null && return
+  msg "jq mangler (trengs for AI-samtalen) — installerer ..."
+  pkg_install jq || die "Klarte ikke installere jq automatisk."
+  command -v jq >/dev/null || die "jq er installert, men finnes fortsatt ikke i PATH."
+}
+
+pve_gjeldende_major() { # -> nåværende PVE-hovedversjon på stdout
+  pveversion | grep -oP 'pve-manager/\K[0-9]+' | head -1
+}
+
+finn_oppgraderingsverktoy() { # -> kommandonavn (f.eks. pve8to9) på stdout, tom streng hvis ingen kjent sti
+  local n neste verktoy
+  n=$(pve_gjeldende_major) || true
+  [ -n "$n" ] || { printf ''; return; }
+  neste=$((n+1))
+  verktoy="pve${n}to${neste}"
+  if command -v "$verktoy" >/dev/null; then printf '%s' "$verktoy"; return; fi
+  # Sjekk-verktøyet ships med siste minor-release av NÅVÆRENDE hovedversjon
+  # (f.eks. pve8to9 kom med 8.4.1) — ikke etter et repo-bytte. Oppdater først.
+  msg "Sjekk-verktøyet $verktoy mangler — oppdaterer pakkelister for å hente det ..."
+  apt-get update -qq >/dev/null 2>&1 || true
+  DEBIAN_FRONTEND=noninteractive apt-get install -y -q --only-upgrade pve-manager >/dev/null 2>&1 || true
+  command -v "$verktoy" >/dev/null && { printf '%s' "$verktoy"; return; }
+  printf ''
+}
+
+# Kjent apt-kildekodenavn-overgang per PVE-hovedversjonshopp, "fra:til:gammelt:nytt".
+# Kan ikke regnes ut generisk fra versjonsnummer — utvid denne når neste
+# overgang (f.eks. 9→10) faktisk er kjent og dokumentert av Proxmox.
+PVE_UPGRADE_CODENAMES="8:9:bookworm:trixie"
+
+finn_kildekodenavn() { # finn_kildekodenavn <fra> <til> -> "gammelt nytt" på stdout, tom hvis ukjent
+  local fra=$1 til=$2 par f t g n
+  for par in $PVE_UPGRADE_CODENAMES; do
+    IFS=: read -r f t g n <<< "$par"
+    if [ "$f" = "$fra" ] && [ "$t" = "$til" ]; then printf '%s %s' "$g" "$n"; return; fi
+  done
+  printf ''
+}
+
+ai_leverandor_valg() { # -> "anthropic" | "openai" | "" (ingen) på stdout
+  local svar
+  while true; do
+    printf '  1) Anthropic Claude\n' >&2
+    printf '  2) OpenAI\n' >&2
+    printf '  3) Ingen — vis kun rå rapport\n' >&2
+    read -rp "Hvilken AI-tjeneste? [1/2/3]: " svar < "$TTY"
+    case "$svar" in
+      1) printf 'anthropic'; return ;;
+      2) printf 'openai'; return ;;
+      3) printf ''; return ;;
+      *) msg "Ugyldig valg: «$svar» — skriv 1, 2 eller 3." ;;
+    esac
+  done
+}
+
+ai_kall() { # ai_kall <leverandor> <api_nokkel> <system> <meldinger_json> -> assistentens tekst på stdout
+  local leverandor=$1 nokkel=$2 system=$3 meldinger=$4 body svar tekst
+  case "$leverandor" in
+    anthropic)
+      body=$(jq -n --arg sys "$system" --argjson msgs "$meldinger" \
+        '{model:"claude-sonnet-5", max_tokens:1024, thinking:{type:"disabled"}, system:$sys, messages:$msgs}')
+      svar=$(curl -fsSL https://api.anthropic.com/v1/messages \
+        -H "content-type: application/json" \
+        -H "x-api-key: $nokkel" \
+        -H "anthropic-version: 2023-06-01" \
+        -d "$body") || { msg "AI-kall feilet (nettverk eller Anthropic-API utilgjengelig)."; return 1; }
+      tekst=$(printf '%s' "$svar" | jq -r '[.content[]? | select(.type=="text") | .text] | join("\n")')
+      ;;
+    openai)
+      body=$(jq -n --arg sys "$system" --argjson msgs "$meldinger" \
+        '{model:"gpt-4o", messages: ([{role:"system", content:$sys}] + $msgs)}')
+      svar=$(curl -fsSL https://api.openai.com/v1/chat/completions \
+        -H "content-type: application/json" \
+        -H "Authorization: Bearer $nokkel" \
+        -d "$body") || { msg "AI-kall feilet (nettverk eller OpenAI-API utilgjengelig)."; return 1; }
+      tekst=$(printf '%s' "$svar" | jq -r '.choices[0].message.content // empty')
+      ;;
+  esac
+  if [ -z "$tekst" ]; then
+    msg "Tomt eller uventet svar fra AI-tjenesten:"
+    printf '%s\n' "$svar" >&2
+    return 1
+  fi
+  printf '%s' "$tekst"
+}
+
+ai_samtale_loop() { # ai_samtale_loop <leverandor> <nokkel> <rapport> -> sluttvurdering-tekst på stdout (tom hvis AI-kall feilet)
+  local leverandor=$1 nokkel=$2 rapport=$3
+  local system meldinger_json runde tekst siste_tekst="" svar_bruker
+  system="Du er en forsiktig, erfaren Proxmox-administrator som hjelper brukeren å vurdere risikoen ved en VE-oppgradering. Du får en rå pve*to*-rapport. Still ETT konkret oppfølgingsspørsmål om gangen hvis du trenger mer informasjon for å gi en trygg anbefaling. Når du er klar til å konkludere, AVSLUTT svaret ditt med en egen linje som starter nøyaktig med «SLUTTVURDERING: JA» eller «SLUTTVURDERING: NEI», etterfulgt av en kort begrunnelse. Ikke bruk denne markøren før du faktisk konkluderer."
+  meldinger_json=$(jq -n --arg r "$rapport" '[{role:"user", content: ("Her er rapporten:\n\n" + $r)}]')
+  for runde in $(seq 1 12); do
+    tekst=$(ai_kall "$leverandor" "$nokkel" "$system" "$meldinger_json") || { printf ''; return; }
+    siste_tekst=$tekst
+    if printf '%s' "$tekst" | grep -q 'SLUTTVURDERING:'; then
+      printf '%s' "$tekst"; return
+    fi
+    msg "AI-en spør (runde $runde/12):"
+    printf '\n%s\n\n' "$tekst" >&2
+    svar_bruker=$(ask "Ditt svar")
+    meldinger_json=$(printf '%s' "$meldinger_json" | jq --arg a "$tekst" --arg u "$svar_bruker" \
+      '. + [{role:"assistant", content:$a}, {role:"user", content:$u}]')
+  done
+  # 12 runder brukt uten SLUTTVURDERING — tving ett siste svar og bruk DET,
+  # ikke et fall tilbake til kun rå rapport.
+  msg "12 runder brukt uten en tydelig sluttvurdering — ber AI-en konkludere nå."
+  meldinger_json=$(printf '%s' "$meldinger_json" | jq \
+    '. + [{role:"user", content:"Du har ikke flere runder igjen. Gi din beste sluttvurdering NÅ, basert på alt vi har diskutert, med SLUTTVURDERING-linjen."}]')
+  tekst=$(ai_kall "$leverandor" "$nokkel" "$system" "$meldinger_json") || { printf '%s' "$siste_tekst"; return; }
+  printf '%s' "$tekst"
+}
+
+ai_konfigfil_policy() { # ai_konfigfil_policy <leverandor> <nokkel> <rapport> -> "confold"|"confnew"-linje fra AI-en, tom hvis feilet
+  local leverandor=$1 nokkel=$2 rapport=$3 system meldinger_json tekst
+  system="Du er en forsiktig Proxmox-administrator. Basert på rapporten under, anbefal ENTEN 'confold' (behold brukerens egne tilpasninger av config-filer) ELLER 'confnew' (bruk vedlikeholders nye versjon) som ÉN global policy for hele oppgraderingen. Svar med en linje som starter med 'ANBEFALING: confold' eller 'ANBEFALING: confnew', etterfulgt av en kort begrunnelse."
+  meldinger_json=$(jq -n --arg r "$rapport" '[{role:"user", content: ("Rapport:\n\n" + $r)}]')
+  tekst=$(ai_kall "$leverandor" "$nokkel" "$system" "$meldinger_json") || { printf ''; return; }
+  msg "AI-ens anbefaling om config-fil-håndtering:"
+  printf '\n%s\n\n' "$tekst" >&2
+  printf '%s' "$tekst"
+}
+
+handling_ve-oppgradering() {
+  sep
+  msg "VE-oppgradering"
+  local verktoy
+  verktoy=$(finn_oppgraderingsverktoy)
+  if [ -z "$verktoy" ]; then
+    msg "Ingen kjent oppgraderingssti fra PVE $(pve_gjeldende_major) ennå — sjekk igjen senere."
+    return
+  fi
+  msg "Kjører $verktoy --full ..."
+  local rapport_fil rapport
+  rapport_fil=$(mktemp)
+  "$verktoy" --full > "$rapport_fil" 2>&1 || true
+  rapport=$(cat "$rapport_fil"); rm -f "$rapport_fil"
+  sep
+  msg "Rå rapport fra $verktoy:"
+  printf '\n%s\n\n' "$rapport" >&2
+
+  local leverandor="" nokkel="" anbefaling=""
+  if ask_yesno "Vil du ha AI-assistert risikovurdering av rapporten?"; then
+    ensure_jq
+    leverandor=$(ai_leverandor_valg)
+    if [ -n "$leverandor" ]; then
+      nokkel=$(ask_secret "API-nøkkel for $leverandor (kun i minnet denne kjøringen, aldri lagret)")
+      sep
+      msg "Starter AI-samtale om oppgraderingen (maks 12 runder) ..."
+      anbefaling=$(ai_samtale_loop "$leverandor" "$nokkel" "$rapport")
+      if [ -n "$anbefaling" ]; then
+        sep
+        msg "AI-ens sluttvurdering:"
+        printf '\n%s\n\n' "$anbefaling" >&2
+      else
+        msg "Fikk ikke noe brukbart svar fra AI-en — går videre med kun den rå rapporten."
+      fi
+    fi
+  fi
+
+  local n neste kodenavn gammelt_navn nytt_navn
+  n=$(pve_gjeldende_major) || true
+  neste=$((n+1))
+  kodenavn=$(finn_kildekodenavn "$n" "$neste")
+  if [ -z "$kodenavn" ]; then
+    msg "Ingen kjent apt-kildekodenavn-overgang fra PVE $n til $neste registrert i skriptet ennå."
+    msg "Sjekk Proxmox sin offisielle oppgraderingsguide manuelt, og legg ev. inn overgangen i PVE_UPGRADE_CODENAMES i setup.sh."
+    return
+  fi
+  read -r gammelt_navn nytt_navn <<< "$kodenavn"
+
+  local anbefalt_policy="" konfigpolicy policy_svar
+  if [ -n "$leverandor" ]; then
+    anbefalt_policy=$(ai_konfigfil_policy "$leverandor" "$nokkel" "$rapport" | grep -oP "ANBEFALING:\s*\Kconf(old|new)" | head -1) || true
+  fi
+  sep
+  msg "Config-fil-håndtering under oppgraderingen (gjelder som ÉN policy for hele kjøringen):"
+  msg "  confold = behold DINE tilpasninger av config-filer (tryggest for en produksjonshypervisor)"
+  msg "  confnew = bruk vedlikeholders NYE versjon av config-filene"
+  [ -n "$anbefalt_policy" ] && msg "AI-en anbefaler: $anbefalt_policy"
+  while true; do
+    read -rp "Velg policy [confold/confnew]: " policy_svar < "$TTY"
+    case "$policy_svar" in
+      confold|confnew) konfigpolicy=$policy_svar; break ;;
+      *) msg "Ugyldig valg: «$policy_svar» — skriv confold eller confnew." ;;
+    esac
+  done
+
+  sep
+  msg "Klar til å oppgradere fra PVE $n til PVE $neste ($gammelt_navn → $nytt_navn)."
+  msg "Dette bytter apt-kildene, kjører apt update, og deretter apt dist-upgrade interaktivt i forgrunnen."
+  local bekreft
+  bekreft=$(ask "Skriv nøyaktig «ja, kjør oppgraderingen» for å fortsette — alt annet avbryter uten endringer")
+  if [ "$bekreft" != "ja, kjør oppgraderingen" ]; then
+    msg "Avbryter — ingen endringer gjort."
+    return
+  fi
+
+  msg "Bytter apt-kilder fra $gammelt_navn til $nytt_navn ..."
+  grep -rl "$gammelt_navn" /etc/apt/sources.list /etc/apt/sources.list.d/ 2>/dev/null | while read -r f; do
+    sed -i "s/\b$gammelt_navn\b/$nytt_navn/g" "$f"
+  done
+  ok "Apt-kilder oppdatert."
+
+  msg "Kjører apt-get update ..."
+  apt-get update || die "apt-get update feilet — sjekk apt-kildene manuelt før du prøver igjen."
+
+  msg "Kjører apt-get dist-upgrade (interaktivt — svar selv på eventuelle pakke-spørsmål) ..."
+  local force_flag
+  case "$konfigpolicy" in
+    confold) force_flag='--force-confold' ;;
+    confnew) force_flag='--force-confnew' ;;
+  esac
+  apt-get -o "Dpkg::Options::=$force_flag" dist-upgrade \
+    || die "apt-get dist-upgrade feilet — systemet kan være i en delvis oppgradert tilstand. Undersøk manuelt før du fortsetter."
+  ok "Oppgradering til PVE $neste fullført."
+
+  if ask_yesno "Starte serveren på nytt nå?"; then
+    msg "Starter på nytt ..."
+    reboot
+  else
+    msg "Husk å starte serveren på nytt manuelt for at oppgraderingen skal fullføres helt."
+  fi
 }
 
 detect_os() {
