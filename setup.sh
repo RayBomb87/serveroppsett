@@ -563,7 +563,7 @@ ai_leverandor_valg() { # -> "anthropic" | "openai" | "gemini" | "" (ingen) på s
       openai    "OpenAI" \
       gemini    "Google Gemini" \
       ingen     "Nei — vis kun rå rapport" \
-      3>&1 1>&2 2>&3 < "$TTY") || { printf ''; return; }
+      3>&1 1>&2 2>&3 < "$TTY") || { printf 'AVBRYT'; return; }
     [ "$tag" = ingen ] && printf '' || printf '%s' "$tag"
     return
   fi
@@ -608,7 +608,7 @@ ai_modell_valg() { # ai_modell_valg <leverandor> -> modell-ID på stdout, eller 
       god     "$god_navn — \$$god_inn / \$$god_ut per 1M" \
       beste   "$beste_navn — \$$beste_inn / \$$beste_ut per 1M" \
       tilbake "Bytt AI-tjeneste" \
-      3>&1 1>&2 2>&3 < "$TTY") || tag=tilbake
+      3>&1 1>&2 2>&3 < "$TTY") || { printf 'AVBRYT'; return; }
     case "$tag" in
       god) printf '%s' "$god_id" ;;
       beste) printf '%s' "$beste_id" ;;
@@ -815,8 +815,16 @@ handling_ve-oppgradering() {
     ensure_jq
     while true; do
       leverandor=$(ai_leverandor_valg)
+      if [ "$leverandor" = AVBRYT ]; then
+        msg "Avbrutt av bruker i AI-leverandørvalget — avslutter hele skriptet uten flere endringer."
+        exit 0
+      fi
       [ -z "$leverandor" ] && break
       modell=$(ai_modell_valg "$leverandor")
+      if [ "$modell" = AVBRYT ]; then
+        msg "Avbrutt av bruker i AI-modellvalget — avslutter hele skriptet uten flere endringer."
+        exit 0
+      fi
       [ "$modell" = TILBAKE ] && continue
       break
     done
