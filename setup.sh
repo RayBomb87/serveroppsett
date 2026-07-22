@@ -359,10 +359,31 @@ handling_gpu-drivere() { skip "GPU-drivere er ikke bygget ennå — kommer i en 
 # som kan kjøres direkte på Proxmox-hosten. community_script_navn_<navn>() gir
 # visningsnavn, community_script_url_<navn>() gir rå script-URL-en. Nye
 # scripts legges til her etter samme mønster.
-COMMUNITY_SCRIPT_KATALOG="post-pve-install"
+COMMUNITY_SCRIPT_KATALOG="post-pve-install kernel-clean fstrim disk-health microcode cron-update-lxcs hw-acceleration usb-passthrough"
 
-community_script_navn_post-pve-install() { printf 'Post-install-oppsett (fjerner abonnements-nag, setter opp no-subscription-repo m.m.)'; }
-community_script_url_post-pve-install()  { printf 'https://raw.githubusercontent.com/community-scripts/ProxmoxVE/main/tools/pve/post-pve-install.sh'; }
+community_script_navn_post-pve-install()   { printf 'Post-install-oppsett (fjerner abonnements-nag, setter opp no-subscription-repo m.m.)'; }
+community_script_url_post-pve-install()    { printf 'https://raw.githubusercontent.com/community-scripts/ProxmoxVE/main/tools/pve/post-pve-install.sh'; }
+
+community_script_navn_kernel-clean()       { printf 'Rydd opp gamle kjerner (behold kun nåværende + én forrige)'; }
+community_script_url_kernel-clean()        { printf 'https://raw.githubusercontent.com/community-scripts/ProxmoxVE/main/tools/pve/kernel-clean.sh'; }
+
+community_script_navn_fstrim()             { printf 'Sett opp periodisk SSD/NVMe-TRIM'; }
+community_script_url_fstrim()              { printf 'https://raw.githubusercontent.com/community-scripts/ProxmoxVE/main/tools/pve/fstrim.sh'; }
+
+community_script_navn_disk-health()        { printf 'Vis disk-helse (SMART-status for alle disker)'; }
+community_script_url_disk-health()         { printf 'https://raw.githubusercontent.com/community-scripts/ProxmoxVE/main/tools/pve/disk-health.sh'; }
+
+community_script_navn_microcode()          { printf 'Installer CPU-mikrokode-oppdateringer (Intel/AMD)'; }
+community_script_url_microcode()           { printf 'https://raw.githubusercontent.com/community-scripts/ProxmoxVE/main/tools/pve/microcode.sh'; }
+
+community_script_navn_cron-update-lxcs()   { printf 'Sett opp automatisk cron-oppdatering av alle LXC-gjester'; }
+community_script_url_cron-update-lxcs()    { printf 'https://raw.githubusercontent.com/community-scripts/ProxmoxVE/main/tools/pve/cron-update-lxcs.sh'; }
+
+community_script_navn_hw-acceleration()    { printf 'Sett opp GPU-maskinvareakselerasjon i en LXC (transkoding m.m.)'; }
+community_script_url_hw-acceleration()     { printf 'https://raw.githubusercontent.com/community-scripts/ProxmoxVE/main/tools/pve/hw-acceleration.sh'; }
+
+community_script_navn_usb-passthrough()    { printf 'Sett opp USB-passthrough til en privilegert LXC'; }
+community_script_url_usb-passthrough()     { printf 'https://raw.githubusercontent.com/community-scripts/ProxmoxVE/main/tools/pve/usb-passthrough.sh'; }
 
 sporsmal_community_script() { # -> valgt katalog-navn på stdout, eller tom streng (avbrutt)
   local -a navn=()
