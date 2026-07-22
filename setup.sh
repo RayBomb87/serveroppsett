@@ -90,16 +90,47 @@ $innhold_brutt"
   printf '\n%s\n\n' "$innhold" >&2
 }
 
-sporsmal_ekstra_kommentar() { # -> ekstra kommentar på stdout, kan være tom (Enter/OK uten tekst er gyldig, ulikt ask())
+sporsmal_ekstra_kommentar() { # sporsmal_ekstra_kommentar <ai_tekst> -> ekstra kommentar på stdout, kan være tom (Enter/OK uten tekst er gyldig, ulikt ask())
+  # AI-ens spørsmål bygges INN i selve boksen (ikke bare vist i en egen boks
+  # rett før) - ellers må brukeren huske spørsmålet fra en boks som allerede
+  # er lukket når svar-boksen dukker opp.
+  local ai_tekst=$1
   if whiptail_klar; then
+    local innhold_brutt tekst hoyde
+    innhold_brutt=$(printf '%s' "$ai_tekst" | fold -s -w 96)
+    tekst="$innhold_brutt
+
+Skriv svaret ditt her (la stå tomt for å gå videre uten):"
+    hoyde=$(($(printf '%s\n' "$tekst" | wc -l) + 8))
+    [ "$hoyde" -gt 34 ] && hoyde=34
     whiptail --title "Ditt svar" --ok-button "OK" --cancel-button "Avbryt" \
-      --inputbox "Stilte AI-en et spørsmål i teksten over? Skriv svaret ditt her (la stå tomt for å gå videre uten):" 12 76 \
+      --inputbox "$tekst" "$hoyde" 104 \
       3>&1 1>&2 2>&3 < "$TTY" || printf ''
     return
   fi
   local tillegg
   read -rp "Stilte AI-en et spørsmål i teksten over? Skriv svaret ditt her (Enter for å gå videre uten): " tillegg < "$TTY"
   printf '%s' "$tillegg"
+}
+
+sporsmal_ai_svar() { # sporsmal_ai_svar <ai_tekst> -> brukerens svar på stdout (spør på nytt til ikke-tomt, whiptail-spor)
+  local ai_tekst=$1
+  if whiptail_klar; then
+    local innhold_brutt tekst hoyde svar
+    innhold_brutt=$(printf '%s' "$ai_tekst" | fold -s -w 96)
+    tekst="$innhold_brutt
+
+Ditt svar:"
+    hoyde=$(($(printf '%s\n' "$tekst" | wc -l) + 8))
+    [ "$hoyde" -gt 34 ] && hoyde=34
+    while true; do
+      svar=$(whiptail --title "Ditt svar" --ok-button "OK" --cancel-button "Avbryt" \
+        --inputbox "$tekst" "$hoyde" 104 \
+        3>&1 1>&2 2>&3 < "$TTY") || continue
+      [ -n "$svar" ] && { printf '%s' "$svar"; return; }
+    done
+  fi
+  ask "Ditt svar"
 }
 
 whiptail_bredde() { # whiptail_bredde <linje/flerlinjestreng> ... -> bredde på stdout (lengste linje + margin, med gulv på 40)
@@ -855,14 +886,11 @@ $ut
 
     if [ -n "$kommando_resultat" ]; then
       local tillegg
-      if [ -n "${prosa//[[:space:]]/}" ]; then
-        vis_ai_tekst "Spørsmålet AI-en stilte (gjentatt, så du slipper å skrolle opp forbi kommando-output):" "$prosa"
-      fi
-      tillegg=$(sporsmal_ekstra_kommentar)
+      tillegg=$(sporsmal_ekstra_kommentar "$prosa")
       svar_bruker="Resultat av kommandoene AI-en ba om:${kommando_resultat}"
       [ -n "$tillegg" ] && svar_bruker="$svar_bruker"$'\n\nEkstra kommentar fra brukeren: '"$tillegg"
     else
-      svar_bruker=$(ask "Ditt svar")
+      svar_bruker=$(sporsmal_ai_svar "$prosa")
     fi
 
     meldinger_json=$(printf '%s' "$meldinger_json" | jq --arg a "$tekst" --arg u "$svar_bruker" \
