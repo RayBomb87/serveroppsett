@@ -783,7 +783,10 @@ handling_ve-oppgradering() {
     confold) force_flag='--force-confold' ;;
     confnew) force_flag='--force-confnew' ;;
   esac
-  apt-get -o "Dpkg::Options::=$force_flag" dist-upgrade < "$TTY" \
+  # --force-confdef trengs i tillegg til --force-confold/-confnew — uten den
+  # spør dpkg likevel interaktivt om hver enkelt config-fil som er endret
+  # BÅDE lokalt og av den nye pakkeversjonen, på tross av valgt policy.
+  apt-get -o "Dpkg::Options::=--force-confdef" -o "Dpkg::Options::=$force_flag" dist-upgrade < "$TTY" \
     || die "apt-get dist-upgrade feilet — sjekk output over. Hvis den bare abortere på et Y/n-spørsmål er ingen pakker endret ennå og det er trygt å prøve igjen; hvis den feilet midt i nedlasting/installasjon kan systemet være i en delvis oppgradert tilstand og bør undersøkes manuelt."
   ok "Oppgradering til PVE $neste fullført."
 
