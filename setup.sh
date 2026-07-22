@@ -764,14 +764,24 @@ ai_samtale_loop() { # ai_samtale_loop <leverandor> <modell> <nokkel> <rapport> -
     # Pluk ut ```bash/sh/shell-kodeblokker AI-en ba om å få kjørt — vis, spør,
     # kjør på serveren ved godkjenning, og send output automatisk tilbake i
     # stedet for å tvinge brukeren til å kjøre kommandoer manuelt et annet sted.
-    local fence_re='^```(bash|sh|shell)?[[:space:]]*$'
+    # Åpning KREVER språktag (bash/sh/shell) - AI-en bruker ofte en ren ```
+    # uten tag til å vise frem/eksempel-tekst (f.eks. en før/etter-linje i en
+    # konfigfil) som IKKE er ment å kjøres, og det skal fortsatt regnes som
+    # vanlig prosa, ikke tilbys for kjøring. Lukking er alltid en ren ```
+    # uten tag (slik markdown-fences fungerer), så den sjekkes separat.
+    local fence_apne_re='^```(bash|sh|shell)[[:space:]]*$'
+    local fence_lukke_re='^```[[:space:]]*$'
     local -a blokker=()
     local inn=0 blokk="" linje prosa=""
     while IFS= read -r linje; do
-      if [[ "$linje" =~ $fence_re ]]; then
-        if [ "$inn" -eq 1 ]; then blokker+=("$blokk"); blokk=""; inn=0; else inn=1; blokk=""; fi
-      elif [ "$inn" -eq 1 ]; then
-        blokk+="$linje"$'\n'
+      if [ "$inn" -eq 1 ]; then
+        if [[ "$linje" =~ $fence_lukke_re ]]; then
+          blokker+=("$blokk"); blokk=""; inn=0
+        else
+          blokk+="$linje"$'\n'
+        fi
+      elif [[ "$linje" =~ $fence_apne_re ]]; then
+        inn=1; blokk=""
       else
         prosa+="$linje"$'\n'
       fi
