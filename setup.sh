@@ -17,9 +17,11 @@ TTY=/dev/tty
 # start) hadde ALDRI problemet - fikset her ved å koble om skriptets egen
 # stdin til terminalen permanent, så snart som mulig, i stedet for å
 # stole på per-kall-redirects alene.
+echo "DEBUG: stdin FØR exec-fiks: $([ -t 0 ] && echo 'ER en terminal' || echo 'ER IKKE en terminal')" >&2
 if [ ! -t 0 ] && [ -r "$TTY" ]; then
   exec < "$TTY"
 fi
+echo "DEBUG: stdin ETTER exec-fiks: $([ -t 0 ] && echo 'ER en terminal' || echo 'ER IKKE en terminal')" >&2
 
 # Unngå apt-listchanges/perl sine harmløse "Cannot set locale"-varsler på
 # ferske maler uten genererte locales. C.UTF-8 er alltid tilgjengelig uten
