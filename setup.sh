@@ -36,10 +36,16 @@ ask() { # ask "Spørsmål" [default] -> svar på stdout
   fi
 }
 
-ask_yesno() { # ask_yesno "Spørsmål" -> exit 0=ja 1=nei
+ask_yesno() { # ask_yesno "Spørsmål" -> exit 0=ja 1=nei (spør på nytt til gyldig j/n)
   local svar
-  read -rp "$1 [j/n]: " svar < "$TTY"
-  case "$svar" in [jJyY]*) return 0 ;; *) return 1 ;; esac
+  while true; do
+    read -rp "$1 [j/n]: " svar < "$TTY"
+    case "$svar" in
+      [jJyY]*) return 0 ;;
+      [nN]*) return 1 ;;
+      *) msg "Ugyldig svar: «$svar» — skriv j eller n." ;;
+    esac
+  done
 }
 
 ask_valid() { # ask_valid "Spørsmål" "regex" "feilhint" [default] -> svar (spør på nytt til gyldig)
