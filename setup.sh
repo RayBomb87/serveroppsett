@@ -562,7 +562,7 @@ ai_leverandor_valg() { # -> "anthropic" | "openai" | "gemini" | "" (ingen) på s
       1 "Anthropic Claude" \
       2 "OpenAI" \
       3 "Google Gemini" \
-      4 "Nei — vis kun rå rapport" \
+      4 "Nei - vis kun rå rapport" \
       3>&1 1>&2 2>&3 < "$TTY") || { printf 'AVBRYT'; return; }
     case "$tag" in
       1) printf 'anthropic' ;;
@@ -605,13 +605,19 @@ ai_modell_valg() { # ai_modell_valg <leverandor> -> modell-ID på stdout, eller 
       beste_id=gemini-2.5-pro;      beste_navn="Gemini 2.5 Pro";      beste_inn=1.25; beste_ut=10.00
       ;;
   esac
-  local forklaring="Pris per 1 million tokens (inn/ut). Faktisk kostnad avhenger av rapportstørrelse og antall samtalerunder (opptil 12) — typisk et lite antall øre til noen få kroner for en full vurdering. Prisene er et øyeblikksbilde og kan avvike fra leverandørens gjeldende priser."
+  local forklaring="Pris per 1 million tokens (inn/ut). Faktisk kostnad avhenger av rapportstørrelse og antall samtalerunder (opptil 12) - typisk et lite antall øre til noen få kroner for en full vurdering. Prisene er et øyeblikksbilde og kan avvike fra leverandørens gjeldende priser."
+  local forklaring_wt="Pris per 1 million tokens (inn/ut).
+Faktisk kostnad avhenger av rapportstørrelse
+og antall samtalerunder (opptil 12) -
+typisk noen få øre til noen få kroner
+for en full vurdering. Prisene kan avvike
+noe fra leverandørens gjeldende priser."
   if whiptail_klar; then
     local tag
     tag=$(whiptail --title "Velg AI-modell" --ok-button "OK" --cancel-button "Avbryt" \
-      --menu "$forklaring" 18 78 3 \
-      1 "$god_navn — \$$god_inn / \$$god_ut per 1M" \
-      2 "$beste_navn — \$$beste_inn / \$$beste_ut per 1M" \
+      --menu "$forklaring_wt" 20 78 3 \
+      1 "$god_navn - \$$god_inn / \$$god_ut per 1M" \
+      2 "$beste_navn - \$$beste_inn / \$$beste_ut per 1M" \
       3 "Bytt AI-tjeneste" \
       3>&1 1>&2 2>&3 < "$TTY") || { printf 'AVBRYT'; return; }
     case "$tag" in
