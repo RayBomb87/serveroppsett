@@ -90,6 +90,18 @@ $innhold_brutt"
   printf '\n%s\n\n' "$innhold" >&2
 }
 
+sporsmal_ekstra_kommentar() { # -> ekstra kommentar på stdout, kan være tom (Enter/OK uten tekst er gyldig, ulikt ask())
+  if whiptail_klar; then
+    whiptail --title "Ditt svar" --ok-button "OK" --cancel-button "Avbryt" \
+      --inputbox "Stilte AI-en et spørsmål i teksten over? Skriv svaret ditt her (la stå tomt for å gå videre uten):" 12 76 \
+      3>&1 1>&2 2>&3 < "$TTY" || printf ''
+    return
+  fi
+  local tillegg
+  read -rp "Stilte AI-en et spørsmål i teksten over? Skriv svaret ditt her (Enter for å gå videre uten): " tillegg < "$TTY"
+  printf '%s' "$tillegg"
+}
+
 whiptail_bredde() { # whiptail_bredde <linje/flerlinjestreng> ... -> bredde på stdout (lengste linje + margin, med gulv på 40)
   local bredde=40 arg sub
   for arg in "$@"; do
@@ -846,7 +858,7 @@ $ut
       if [ -n "${prosa//[[:space:]]/}" ]; then
         vis_ai_tekst "Spørsmålet AI-en stilte (gjentatt, så du slipper å skrolle opp forbi kommando-output):" "$prosa"
       fi
-      read -rp "Stilte AI-en et spørsmål i teksten over? Skriv svaret ditt her (Enter for å gå videre uten): " tillegg < "$TTY"
+      tillegg=$(sporsmal_ekstra_kommentar)
       svar_bruker="Resultat av kommandoene AI-en ba om:${kommando_resultat}"
       [ -n "$tillegg" ] && svar_bruker="$svar_bruker"$'\n\nEkstra kommentar fra brukeren: '"$tillegg"
     else
