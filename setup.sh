@@ -559,12 +559,17 @@ ai_leverandor_valg() { # -> "anthropic" | "openai" | "gemini" | "" (ingen) på s
     local tag
     tag=$(whiptail --title "AI-assistert risikovurdering" --ok-button "OK" --cancel-button "Avbryt" \
       --menu "Vil du ha AI-assistert risikovurdering av oppgraderingsrapporten?" 16 76 4 \
-      anthropic "Anthropic Claude" \
-      openai    "OpenAI" \
-      gemini    "Google Gemini" \
-      ingen     "Nei — vis kun rå rapport" \
+      1 "Anthropic Claude" \
+      2 "OpenAI" \
+      3 "Google Gemini" \
+      4 "Nei — vis kun rå rapport" \
       3>&1 1>&2 2>&3 < "$TTY") || { printf 'AVBRYT'; return; }
-    [ "$tag" = ingen ] && printf '' || printf '%s' "$tag"
+    case "$tag" in
+      1) printf 'anthropic' ;;
+      2) printf 'openai' ;;
+      3) printf 'gemini' ;;
+      4) printf '' ;;
+    esac
     return
   fi
   local svar
@@ -605,14 +610,14 @@ ai_modell_valg() { # ai_modell_valg <leverandor> -> modell-ID på stdout, eller 
     local tag
     tag=$(whiptail --title "Velg AI-modell" --ok-button "OK" --cancel-button "Avbryt" \
       --menu "$forklaring" 18 78 3 \
-      god     "$god_navn — \$$god_inn / \$$god_ut per 1M" \
-      beste   "$beste_navn — \$$beste_inn / \$$beste_ut per 1M" \
-      tilbake "Bytt AI-tjeneste" \
+      1 "$god_navn — \$$god_inn / \$$god_ut per 1M" \
+      2 "$beste_navn — \$$beste_inn / \$$beste_ut per 1M" \
+      3 "Bytt AI-tjeneste" \
       3>&1 1>&2 2>&3 < "$TTY") || { printf 'AVBRYT'; return; }
     case "$tag" in
-      god) printf '%s' "$god_id" ;;
-      beste) printf '%s' "$beste_id" ;;
-      tilbake) printf 'TILBAKE' ;;
+      1) printf '%s' "$god_id" ;;
+      2) printf '%s' "$beste_id" ;;
+      3) printf 'TILBAKE' ;;
     esac
     return
   fi
