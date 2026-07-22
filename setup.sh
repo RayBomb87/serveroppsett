@@ -43,12 +43,12 @@ ask() { # ask "Spørsmål" [default] -> svar på stdout
   local q=$1 def=${2:-} svar
   if whiptail_klar; then
     if [ -n "$def" ]; then
-      svar=$(whiptail --title "Input" --inputbox "$q" 10 70 "$def" 3>&1 1>&2 2>&3 < "$TTY") || svar=$def
+      svar=$(whiptail --title "Input" --ok-button "OK" --cancel-button "Avbryt" --inputbox "$q" 12 76 "$def" 3>&1 1>&2 2>&3 < "$TTY") || svar=$def
       printf '%s' "${svar:-$def}"
       return
     fi
     while true; do
-      svar=$(whiptail --title "Input" --inputbox "$q" 10 70 3>&1 1>&2 2>&3 < "$TTY") || continue
+      svar=$(whiptail --title "Input" --ok-button "OK" --cancel-button "Avbryt" --inputbox "$q" 12 76 3>&1 1>&2 2>&3 < "$TTY") || continue
       [ -n "$svar" ] && { printf '%s' "$svar"; return; }
     done
   fi
@@ -65,7 +65,7 @@ ask() { # ask "Spørsmål" [default] -> svar på stdout
 
 ask_yesno() { # ask_yesno "Spørsmål" -> exit 0=ja 1=nei (whiptail hvis tilgjengelig, ellers tekst-fallback; spør på nytt til gyldig j/n i tekst-sporet)
   if whiptail_klar; then
-    whiptail --title "Bekreft" --yesno "$1" 10 70 3>&1 1>&2 2>&3 < "$TTY"
+    whiptail --title "Bekreft" --yes-button "Ja" --no-button "Nei" --yesno "$1" 12 76 3>&1 1>&2 2>&3 < "$TTY"
     return $?
   fi
   local svar
@@ -92,7 +92,7 @@ ask_secret() { # ask_secret "Spørsmål" -> svar på stdout, uten ekko, aldri sk
   local svar lengde halvt
   if whiptail_klar; then
     while true; do
-      svar=$(whiptail --title "Skjult input" --passwordbox "$1" 10 70 3>&1 1>&2 2>&3 < "$TTY") && break
+      svar=$(whiptail --title "Skjult input" --ok-button "OK" --cancel-button "Avbryt" --passwordbox "$1" 12 76 3>&1 1>&2 2>&3 < "$TTY") && break
       msg "Avbrutt — prøv igjen (eller Ctrl+C for å avslutte skriptet)."
     done
   else
@@ -554,29 +554,32 @@ finn_kildekodenavn() { # finn_kildekodenavn <fra> <til> -> "gammelt nytt" på st
   printf ''
 }
 
-ai_leverandor_valg() { # -> "anthropic" | "openai" | "" (ingen) på stdout
+ai_leverandor_valg() { # -> "anthropic" | "openai" | "gemini" | "" (ingen) på stdout
   if whiptail_klar; then
     local tag
-    while true; do
-      tag=$(whiptail --title "AI-assistert risikovurdering" \
-        --menu "Vil du ha AI-assistert risikovurdering av oppgraderingsrapporten?" 15 70 3 \
-        anthropic "Anthropic Claude" \
-        openai    "OpenAI" \
-        ingen     "Nei — vis kun rå rapport" \
-        3>&1 1>&2 2>&3 < "$TTY") && { [ "$tag" = ingen ] && printf '' || printf '%s' "$tag"; return; }
-    done
+    tag=$(whiptail --title "AI-assistert risikovurdering" --ok-button "OK" --cancel-button "Avbryt" \
+      --menu "Vil du ha AI-assistert risikovurdering av oppgraderingsrapporten?" 16 76 4 \
+      anthropic "Anthropic Claude" \
+      openai    "OpenAI" \
+      gemini    "Google Gemini" \
+      ingen     "Nei — vis kun rå rapport" \
+      3>&1 1>&2 2>&3 < "$TTY") || { printf ''; return; }
+    [ "$tag" = ingen ] && printf '' || printf '%s' "$tag"
+    return
   fi
   local svar
   while true; do
     printf '  1) Anthropic Claude\n' >&2
     printf '  2) OpenAI\n' >&2
-    printf '  3) Ingen — vis kun rå rapport\n' >&2
-    read -rp "Hvilken AI-tjeneste? [1/2/3]: " svar < "$TTY"
+    printf '  3) Google Gemini\n' >&2
+    printf '  4) Ingen — vis kun rå rapport\n' >&2
+    read -rp "Hvilken AI-tjeneste? [1/2/3/4]: " svar < "$TTY"
     case "$svar" in
       1) printf 'anthropic'; return ;;
       2) printf 'openai'; return ;;
-      3) printf ''; return ;;
-      *) msg "Ugyldig valg: «$svar» — skriv 1, 2 eller 3." ;;
+      3) printf 'gemini'; return ;;
+      4) printf ''; return ;;
+      *) msg "Ugyldig valg: «$svar» — skriv 1, 2, 3 eller 4." ;;
     esac
   done
 }
@@ -592,17 +595,20 @@ ai_modell_valg() { # ai_modell_valg <leverandor> -> modell-ID på stdout, eller 
       god_id=gpt-4o-mini;  god_navn="GPT-4o-mini";  god_inn=0.15;  god_ut=0.60
       beste_id=gpt-4o;     beste_navn="GPT-4o";     beste_inn=2.50; beste_ut=10.00
       ;;
+    gemini)
+      god_id=gemini-3.1-flash-lite; god_navn="Gemini 3.1 Flash-Lite"; god_inn=0.25; god_ut=1.50
+      beste_id=gemini-2.5-pro;      beste_navn="Gemini 2.5 Pro";      beste_inn=1.25; beste_ut=10.00
+      ;;
   esac
   local forklaring="Pris per 1 million tokens (inn/ut). Faktisk kostnad avhenger av rapportstørrelse og antall samtalerunder (opptil 12) — typisk et lite antall øre til noen få kroner for en full vurdering. Prisene er et øyeblikksbilde og kan avvike fra leverandørens gjeldende priser."
   if whiptail_klar; then
     local tag
-    while true; do
-      tag=$(whiptail --title "Velg AI-modell" --menu "$forklaring" 18 78 3 \
-        god     "$god_navn — \$$god_inn / \$$god_ut per 1M" \
-        beste   "$beste_navn — \$$beste_inn / \$$beste_ut per 1M" \
-        tilbake "Bytt AI-tjeneste" \
-        3>&1 1>&2 2>&3 < "$TTY") && break
-    done
+    tag=$(whiptail --title "Velg AI-modell" --ok-button "OK" --cancel-button "Avbryt" \
+      --menu "$forklaring" 18 78 3 \
+      god     "$god_navn — \$$god_inn / \$$god_ut per 1M" \
+      beste   "$beste_navn — \$$beste_inn / \$$beste_ut per 1M" \
+      tilbake "Bytt AI-tjeneste" \
+      3>&1 1>&2 2>&3 < "$TTY") || tag=tilbake
     case "$tag" in
       god) printf '%s' "$god_id" ;;
       beste) printf '%s' "$beste_id" ;;
@@ -646,6 +652,15 @@ ai_kall() { # ai_kall <leverandor> <modell> <api_nokkel> <system> <meldinger_jso
         -H "Authorization: Bearer $nokkel" \
         -d "$body") || { msg "AI-kall feilet (nettverksfeil mot OpenAI — sjekk internettforbindelsen)."; return 1; }
       ;;
+    gemini)
+      # Bruker Geminis OpenAI-kompatible endepunkt (samme respons-form som OpenAI under)
+      body=$(jq -n --arg m "$modell" --arg sys "$system" --argjson msgs "$meldinger" \
+        '{model:$m, max_tokens:4096, messages: ([{role:"system", content:$sys}] + $msgs)}')
+      respons=$(curl -sSL -w '\n%{http_code}' https://generativelanguage.googleapis.com/v1beta/openai/chat/completions \
+        -H "content-type: application/json" \
+        -H "Authorization: Bearer $nokkel" \
+        -d "$body") || { msg "AI-kall feilet (nettverksfeil mot Google Gemini — sjekk internettforbindelsen)."; return 1; }
+      ;;
   esac
   http_kode=$(printf '%s' "$respons" | tail -1)
   svar=$(printf '%s' "$respons" | sed '$d')
@@ -661,7 +676,7 @@ ai_kall() { # ai_kall <leverandor> <modell> <api_nokkel> <system> <meldinger_jso
       tekst=$(printf '%s' "$svar" | jq -r '[.content[]? | select(.type=="text") | .text] | join("\n")')
       stopp_arsak=$(printf '%s' "$svar" | jq -r '.stop_reason // empty')
       ;;
-    openai)
+    openai|gemini)
       tekst=$(printf '%s' "$svar" | jq -r '.choices[0].message.content // empty')
       stopp_arsak=$(printf '%s' "$svar" | jq -r '.choices[0].finish_reason // empty')
       ;;
@@ -810,6 +825,7 @@ handling_ve-oppgradering() {
       case "$leverandor" in
         anthropic) nokkel_url="https://console.anthropic.com/settings/keys" ;;
         openai)    nokkel_url="https://platform.openai.com/api-keys" ;;
+        gemini)    nokkel_url="https://aistudio.google.com/app/apikey" ;;
       esac
       msg "Lag/hent API-nøkkel her: $nokkel_url"
       nokkel=$(ask_secret "API-nøkkel for $leverandor (kun i minnet denne kjøringen, aldri lagret)")
